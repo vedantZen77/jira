@@ -1,0 +1,89 @@
+import React, { useContext, useState } from 'react';
+import { NavLink, useNavigate } from 'react-router-dom';
+import { AuthContext } from '../context/AuthContext';
+import { 
+  LayoutDashboard, 
+  Folders, 
+  CheckSquare, 
+  Settings, 
+  LogOut,
+  Menu,
+  X
+} from 'lucide-react';
+
+const Sidebar = () => {
+  const { logout, user } = useContext(AuthContext);
+  const navigate = useNavigate();
+  const [isOpen, setIsOpen] = useState(false);
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
+
+  const navLinks = [
+    { name: 'Dashboard', path: '/dashboard', icon: <LayoutDashboard size={20} /> },
+    { name: 'Projects', path: '/projects', icon: <Folders size={20} /> },
+    { name: 'My Issues', path: '/issues/me', icon: <CheckSquare size={20} /> },
+    { name: 'Settings', path: '/settings', icon: <Settings size={20} /> },
+  ];
+
+  return (
+    <>
+      <div className="md:hidden flex items-center justify-between p-4 bg-gray-900 text-white">
+        <span className="text-xl font-bold tracking-wider">JIRA CLONE</span>
+        <button onClick={() => setIsOpen(!isOpen)}>
+          {isOpen ? <X size={24} /> : <Menu size={24} />}
+        </button>
+      </div>
+
+      <div className={`${isOpen ? 'block' : 'hidden'} md:flex flex-col w-64 h-full min-h-screen px-4 py-8 bg-gray-900 border-r border-gray-800`}>
+        <h2 className="text-3xl font-bold text-center text-blue-500 tracking-widest hidden md:block mb-10">
+          JIRA
+        </h2>
+
+        <div className="flex flex-col justify-between flex-1 mt-6 text-gray-400">
+          <nav>
+            {navLinks.map((link) => (
+              <NavLink
+                key={link.name}
+                to={link.path}
+                className={({ isActive }) =>
+                  `flex items-center px-4 py-3 mb-2 rounded-lg transition-colors ${
+                    isActive
+                      ? 'bg-blue-600 text-white'
+                      : 'hover:bg-gray-800 hover:text-white'
+                  }`
+                }
+                onClick={() => setIsOpen(false)}
+              >
+                {link.icon}
+                <span className="mx-4 font-medium">{link.name}</span>
+              </NavLink>
+            ))}
+          </nav>
+
+          <div className="flex items-center px-4 -mx-2 mb-4">
+            <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold text-lg">
+              {user?.name?.charAt(0).toUpperCase()}
+            </div>
+            <div className="mx-2">
+              <h4 className="mx-2 font-medium text-gray-200">{user?.name}</h4>
+              <p className="mx-2 mt-1 text-xs text-gray-400 font-medium">{user?.role}</p>
+            </div>
+          </div>
+
+          <button
+            onClick={handleLogout}
+            className="flex items-center px-4 py-3 mt-auto text-gray-400 transition-colors rounded-lg hover:text-white hover:bg-red-600"
+          >
+            <LogOut size={20} />
+            <span className="mx-4 font-medium">Logout</span>
+          </button>
+        </div>
+      </div>
+    </>
+  );
+};
+
+export default Sidebar;
