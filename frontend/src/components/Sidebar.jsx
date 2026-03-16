@@ -1,11 +1,11 @@
 import React, { useContext, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
-import { 
-  LayoutDashboard, 
-  Folders, 
-  CheckSquare, 
-  Settings, 
+import {
+  LayoutDashboard,
+  Folders,
+  CheckSquare,
+  Settings,
   LogOut,
   Menu,
   X
@@ -30,29 +30,28 @@ const Sidebar = () => {
 
   return (
     <>
-      <div className="md:hidden flex items-center justify-between p-4 bg-gray-900 text-white">
+      <div className="md:hidden flex items-center justify-between p-4 bg-black text-white">
         <span className="text-xl font-bold tracking-wider">JIRA CLONE</span>
         <button onClick={() => setIsOpen(!isOpen)}>
           {isOpen ? <X size={24} /> : <Menu size={24} />}
         </button>
       </div>
 
-      <div className={`${isOpen ? 'block' : 'hidden'} md:flex flex-col w-64 h-full min-h-screen px-4 py-8 bg-gray-900 border-r border-gray-800`}>
+      <div className={`${isOpen ? 'block' : 'hidden'} md:flex flex-col w-64 h-full min-h-screen px-4 py-8 bg-slate-700 border-r border-gray-900`}>
         <h2 className="text-3xl font-bold text-center text-blue-500 tracking-widest hidden md:block mb-10">
           JIRA
         </h2>
 
-        <div className="flex flex-col justify-between flex-1 mt-6 text-gray-400">
+        <div className="flex flex-col justify-between flex-1 mt-6 text-gray-300">
           <nav>
             {navLinks.map((link) => (
               <NavLink
                 key={link.name}
                 to={link.path}
                 className={({ isActive }) =>
-                  `flex items-center px-4 py-3 mb-2 rounded-lg transition-colors ${
-                    isActive
-                      ? 'bg-blue-600 text-white'
-                      : 'hover:bg-gray-800 hover:text-white'
+                  `flex items-center px-4 py-3 mb-2 rounded-lg transition-colors ${isActive
+                    ? 'bg-blue-600 text-white shadow-md'
+                    : 'hover:bg-gray-900 hover:text-white'
                   }`
                 }
                 onClick={() => setIsOpen(false)}
@@ -68,14 +67,14 @@ const Sidebar = () => {
               {user?.name?.charAt(0).toUpperCase()}
             </div>
             <div className="mx-2">
-              <h4 className="mx-2 font-medium text-gray-200">{user?.name}</h4>
+              <h4 className="mx-2 font-medium text-white">{user?.name}</h4>
               <p className="mx-2 mt-1 text-xs text-gray-400 font-medium">{user?.role}</p>
             </div>
           </div>
 
           <button
             onClick={handleLogout}
-            className="flex items-center px-4 py-3 mt-auto text-gray-400 transition-colors rounded-lg hover:text-white hover:bg-red-600"
+            className="flex items-center px-4 py-3 mt-auto text-blue-100 transition-colors rounded-lg hover:text-white hover:bg-red-600"
           >
             <LogOut size={20} />
             <span className="mx-4 font-medium">Logout</span>

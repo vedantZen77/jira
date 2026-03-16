@@ -49,6 +49,7 @@ const ProjectBoard = () => {
   const [newIssue, setNewIssue] = useState({
     title: '', description: '', issueType: 'Task', priority: 'Medium', assignee: ''
   });
+  const [draggingIssueId, setDraggingIssueId] = useState(null);
 
   // Fetch logic
   const fetchProjectData = async () => {
@@ -84,6 +85,20 @@ const ProjectBoard = () => {
     }
   };
 
+  const handleDragStart = (issueId) => {
+    setDraggingIssueId(issueId);
+  };
+
+  const handleDrop = (status) => {
+    if (!draggingIssueId) return;
+    handleStatusChange(draggingIssueId, status);
+    setDraggingIssueId(null);
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+  };
+
   const handleStatusChange = async (issueId, newStatus) => {
     try {
       // Optimistic update
@@ -113,10 +128,15 @@ const ProjectBoard = () => {
     }
   };
 
-  const filteredIssues = issues.filter(issue => 
-    issue.title.toLowerCase().includes(filterText.toLowerCase()) || 
-    (issue.assignee && issue.assignee.name.toLowerCase().includes(filterText.toLowerCase()))
-  );
+  const filteredIssues = issues.filter(issue => {
+    const query = filterText.toLowerCase().trim();
+    if (!query) return true;
+    const titleMatch = issue.title.toLowerCase().includes(query);
+    const assigneeMatch = issue.assignee && issue.assignee.name.toLowerCase().includes(query);
+    const ticketKey = `${project.key}-${issue._id.slice(-4).toUpperCase()}`;
+    const ticketMatch = ticketKey.toLowerCase().includes(query);
+    return titleMatch || assigneeMatch || ticketMatch;
+  });
 
   const availableMembers = project ? [project.createdBy, ...project.members] : [];
 
@@ -141,9 +161,9 @@ const ProjectBoard = () => {
   return (
     <Layout title={`${project.key} Board`}>
       <div className="mb-6">
-        <h2 className="text-2xl font-bold text-gray-800">{project.name}</h2>
-      <div className="flex items-center text-sm text-gray-500 mt-2 space-x-4">
-        <span>Key: {project.key}</span>
+        <h2 className="text-2xl font-bold text-gray-900 tracking-tight">{project.name}</h2>
+      <div className="flex flex-wrap items-center text-sm text-gray-500 mt-2 gap-3">
+        <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 font-medium text-xs">Key: {project.key}</span>
         <span>Lead: {project.createdBy?.name}</span>
       </div>
       
@@ -221,29 +241,33 @@ const ProjectBoard = () => {
     </div>
 
       <div className="flex items-center justify-between mb-6">
-        <div className="flex space-x-2">
-          {/* Filters */}
+        <div className="flex flex-col md:flex-row md:items-center md:space-x-3 w-full md:w-auto gap-3">
           <input 
             type="text" 
-            placeholder="Filter issues by title or assignee..." 
-            className="px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 w-64 md:w-80" 
+            placeholder="Search by title, assignee, or ticket (KEY-1234)..." 
+            className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 w-full md:w-80 text-sm" 
             value={filterText}
             onChange={(e) => setFilterText(e.target.value)}
           />
         </div>
         <div className="flex space-x-3">
-          <button onClick={() => setIsCreateModalOpen(true)} className="flex items-center bg-blue-600 text-white px-4 py-2 rounded-lg shadow-sm hover:bg-blue-700 transition">
+          <button onClick={() => setIsCreateModalOpen(true)} className="flex items-center bg-blue-600 text-white px-4 py-2.5 rounded-lg shadow-sm hover:bg-blue-700 transition text-sm font-medium">
             <Plus size={18} className="mr-2" /> Create Issue
           </button>
         </div>
       </div>
 
       {/* Kanban Board Container */}
-      <div className="flex gap-6 overflow-x-auto pb-8 h-[calc(100vh-280px)]">
+      <div className="flex gap-6 overflow-x-auto pb-8 h-[calc(100vh-260px)]">
         {statuses.map((status) => {
           const columnIssues = filteredIssues.filter((issue) => issue.status === status);
           return (
-            <div key={status} className="flex flex-col bg-gray-100 rounded-xl min-w-[320px] max-w-[320px] p-4 border border-gray-200">
+            <div
+              key={status}
+              className="flex flex-col bg-gray-100 rounded-xl min-w-[320px] max-w-[320px] p-4 border border-gray-200"
+              onDragOver={handleDragOver}
+              onDrop={() => handleDrop(status)}
+            >
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center space-x-2">
                   <span className={`px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider ${getStatusColor(status)}`}>
@@ -258,7 +282,9 @@ const ProjectBoard = () => {
               <div className="flex flex-col gap-3 overflow-y-auto pr-1 pb-2">
                 {columnIssues.map((issue) => (
                   <div 
-                    key={issue._id} 
+                    key={issue._id}
+                    draggable
+                    onDragStart={() => handleDragStart(issue._id)}
                     className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 hover:shadow-md cursor-pointer transition flex flex-col group relative"
                     onClick={() => setSelectedIssue(issue)}
                   >

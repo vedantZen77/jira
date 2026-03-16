@@ -8,6 +8,7 @@ const Register = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [role, setRole] = useState('developer');
   const [error, setError] = useState('');
   
   const { register, user } = useContext(AuthContext);
@@ -26,7 +27,7 @@ const Register = () => {
       return;
     }
     try {
-      await register(name, email, password);
+      await register(name, email, password, role);
       // Navigate is handled by useEffect
     } catch (err) {
       setError(err);
@@ -106,6 +107,23 @@ const Register = () => {
               onChange={(e) => setConfirmPassword(e.target.value)}
               required
             />
+          </div>
+
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="role">
+              Role
+            </label>
+            <select
+              id="role"
+              className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+            >
+              <option value="admin">Admin</option>
+              <option value="manager">Manager</option>
+              <option value="developer">Developer</option>
+              <option value="viewer">Viewer</option>
+            </select>
           </div>
 
           <button

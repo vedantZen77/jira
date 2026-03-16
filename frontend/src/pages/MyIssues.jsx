@@ -4,6 +4,7 @@ import Layout from '../components/Layout';
 import api from '../utils/api';
 import { CheckSquare, Search } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import TicketDetailsModal from '../components/TicketDetailsModal';
 
 const MyIssues = () => {
   const { user } = useContext(AuthContext);
@@ -13,6 +14,8 @@ const MyIssues = () => {
   const [filterStatus, setFilterStatus] = useState('');
   const [filterPriority, setFilterPriority] = useState('');
   const [filterType, setFilterType] = useState('');
+  const [selectedIssue, setSelectedIssue] = useState(null);
+  const [selectedProject, setSelectedProject] = useState(null);
 
   useEffect(() => {
     const fetchMyIssues = async () => {
@@ -141,10 +144,19 @@ const MyIssues = () => {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filteredIssues.map(issue => (
-                  <tr key={issue._id} className="hover:bg-gray-50 transition group">
+                  <tr
+                    key={issue._id}
+                    className="hover:bg-gray-50 transition group cursor-pointer"
+                    onClick={() => {
+                      setSelectedIssue(issue);
+                      setSelectedProject(issue.projectObj);
+                    }}
+                  >
                     <td className="py-4 px-4 font-medium text-gray-800">
                       <div className="flex flex-col">
-                        <Link to={`/project/${issue.projectId}`} className="text-gray-900 font-semibold hover:text-blue-600 transition mb-1 line-clamp-1">{issue.title}</Link>
+                        <span className="text-gray-900 font-semibold group-hover:text-blue-600 transition mb-1 line-clamp-1">
+                          {issue.title}
+                        </span>
                         <span className="text-xs text-gray-500 flex items-center">
                            <span className="px-1.5 py-0.5 bg-gray-100 border border-gray-200 rounded text-[10px] uppercase font-bold mr-2">{issue.issueType}</span>
                            {issue.projectObj?.key}-{issue._id.slice(-4).toUpperCase()}
@@ -165,10 +177,16 @@ const MyIssues = () => {
                       <span className={`font-semibold px-2.5 py-1 z-10 rounded text-xs border ${getStatusColor(issue.status)}`}>{issue.status}</span>
                     </td>
                     <td className="py-4 px-4 text-sm">
-                       <Link to={`/project/${issue.projectId}`} className="text-gray-600 hover:text-blue-600 hover:underline">{issue.projectObj?.name}</Link>
+                       <span className="text-gray-600">{issue.projectObj?.name}</span>
                     </td>
                     <td className="py-4 px-4 text-sm text-right">
-                       <Link to={`/project/${issue.projectId}`} className="opacity-0 group-hover:opacity-100 text-blue-600 hover:underline font-semibold transition-opacity">Go to Board</Link>
+                       <Link
+                         to={`/project/${issue.projectId}`}
+                         onClick={e => e.stopPropagation()}
+                         className="opacity-0 group-hover:opacity-100 text-blue-600 hover:underline font-semibold transition-opacity"
+                       >
+                         Go to Board
+                       </Link>
                     </td>
                   </tr>
                 ))}
@@ -177,6 +195,22 @@ const MyIssues = () => {
           </div>
         )}
       </div>
+      {selectedIssue && selectedProject && (
+        <TicketDetailsModal
+          issue={selectedIssue}
+          project={selectedProject}
+          onClose={() => {
+            setSelectedIssue(null);
+            setSelectedProject(null);
+          }}
+          onUpdate={(updatedIssue) => {
+            setIssues(prev =>
+              prev.map(i => i._id === updatedIssue._id ? { ...i, ...updatedIssue } : i)
+            );
+            setSelectedIssue(updatedIssue);
+          }}
+        />
+      )}
     </Layout>
   );
 };

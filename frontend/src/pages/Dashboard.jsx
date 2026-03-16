@@ -2,7 +2,7 @@ import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import Layout from '../components/Layout';
 import api from '../utils/api';
-import { Plus, Briefcase, ChevronRight, Search, Key } from 'lucide-react';
+import { Plus, Briefcase, ChevronRight, Search, Key, Trash2 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
 const Dashboard = () => {
@@ -15,6 +15,13 @@ const Dashboard = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [filterText, setFilterText] = useState('');
   const [newProject, setNewProject] = useState({ name: '', key: '', description: '' });
+  const [deletingId, setDeletingId] = useState(null);
+
+  const isLead = (project) => {
+    return project.createdBy && project.createdBy.toString
+      ? project.createdBy.toString() === user?._id
+      : project.createdBy === user?._id || project.createdBy?._id === user?._id;
+  };
 
   const fetchProjects = async () => {
     try {
@@ -50,6 +57,21 @@ const Dashboard = () => {
     project.key.toLowerCase().includes(filterText.toLowerCase())
   );
 
+  const handleDeleteProject = async (project) => {
+    if (!window.confirm(`Delete project "${project.name}"? This action cannot be undone.`)) {
+      return;
+    }
+    try {
+      setDeletingId(project._id);
+      await api.delete(`/projects/${project._id}`);
+      setProjects(projects.filter(p => p._id !== project._id));
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to delete project');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   if (loading) return <Layout title="Dashboard"><div className="flex justify-center items-center h-full text-blue-500 font-semibold tracking-wider">Loading...</div></Layout>;
 
   return (
@@ -57,8 +79,8 @@ const Dashboard = () => {
       {/* Header Actions */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-800">Your Projects</h2>
-          <p className="text-gray-500 text-sm mt-1">Manage and track your active projects</p>
+          <h2 className="text-2xl font-bold tracking-tight text-gray-900">Your projects</h2>
+          <p className="text-sm mt-1 text-gray-500">Manage and track work across your teams.</p>
         </div>
         <div className="flex space-x-3 w-full md:w-auto">
           <div className="relative flex-1 md:w-64">
@@ -112,8 +134,8 @@ const Dashboard = () => {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredProjects.map((project) => (
-            <Link key={project._id} to={`/project/${project._id}`} className="block group">
-              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 group-hover:shadow-xl group-hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-300 h-full relative overflow-hidden">
+            <div key={project._id} className="group">
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 group-hover:shadow-xl group-hover:border-blue-400 focus:outline-none transition-all duration-300 h-full relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-blue-50 to-blue-100 rounded-bl-full -z-10 opacity-50 group-hover:scale-110 transition-transform duration-500"></div>
                 
                 <div className="flex items-start justify-between mb-5">
@@ -123,9 +145,22 @@ const Dashboard = () => {
                     </div>
                     <div>
                       <h3 className="text-xl font-bold text-gray-800 tracking-tight group-hover:text-blue-600 transition-colors">{project.name}</h3>
-                      <p className="text-xs text-gray-400 font-medium">Created by you</p>
+                      <p className="text-xs text-gray-400 font-medium">
+                        {isLead(project) ? 'You are the lead' : 'Shared with you'}
+                      </p>
                     </div>
                   </div>
+                  {isLead(project) && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteProject(project)}
+                      disabled={deletingId === project._id}
+                      className="ml-3 inline-flex items-center justify-center h-8 w-8 rounded-full text-gray-400 hover:text-red-600 hover:bg-red-50 transition disabled:opacity-50"
+                      title="Delete project"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
                 </div>
                 
                 <p className="text-gray-600 text-sm mb-6 line-clamp-2 leading-relaxed">
@@ -137,10 +172,16 @@ const Dashboard = () => {
                       <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold border-2 border-white z-10">{user?.name?.charAt(0)}</div>
                       {project.members.length > 0 && <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 text-xs font-bold border-2 border-white z-0">+{project.members.length}</div>}
                    </div>
-                   <span className="text-blue-600 font-semibold text-sm group-hover:underline">View Board</span>
+                   <Link
+                     to={`/project/${project._id}`}
+                     className="inline-flex items-center text-blue-600 font-semibold text-sm group-hover:underline"
+                   >
+                     View Board
+                     <ChevronRight size={16} className="ml-1" />
+                   </Link>
                 </div>
               </div>
-            </Link>
+            </div>
           ))}
         </div>
       )}

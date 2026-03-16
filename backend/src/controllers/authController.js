@@ -90,6 +90,35 @@ const getUserProfile = async (req, res) => {
   }
 };
 
+// @desc    Update user profile (name, role)
+// @route   PUT /api/auth/me
+// @access  Private
+const updateUserProfile = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const { name, role } = req.body;
+    if (name) user.name = name;
+    if (role) user.role = role;
+
+    await user.save();
+
+    res.json({
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      avatar: user.avatar,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 // @desc    Get all users
 // @route   GET /api/auth/users
 // @access  Private
@@ -106,5 +135,6 @@ module.exports = {
   registerUser,
   loginUser,
   getUserProfile,
+  updateUserProfile,
   getAllUsers,
 };

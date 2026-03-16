@@ -1,10 +1,30 @@
-import React, { useContext } from 'react';
+import React, { useContext, useState } from 'react';
 import Layout from '../components/Layout';
 import { AuthContext } from '../context/AuthContext';
 import { User, Mail, Shield, AlertCircle } from 'lucide-react';
 
 const Settings = () => {
-  const { user } = useContext(AuthContext);
+  const { user, updateProfile } = useContext(AuthContext);
+  const [name, setName] = useState(user?.name || '');
+  const [role, setRole] = useState(user?.role || 'developer');
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setMessage('');
+    setError('');
+    try {
+      await updateProfile({ name, role });
+      setMessage('Profile updated successfully.');
+    } catch (err) {
+      setError(err);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <Layout title="Account Settings">
@@ -25,38 +45,78 @@ const Settings = () => {
               </p>
             </div>
           </div>
-          <div className="p-6 space-y-4">
-            <div className="flex items-center space-x-4 border-b border-gray-50 pb-4">
-               <div className="w-10 h-10 rounded-full bg-gray-50 flex items-center justify-center text-gray-400">
-                  <User size={20} />
-               </div>
-               <div className="flex-1">
-                  <p className="text-sm font-semibold text-gray-500">Full Name</p>
-                  <p className="font-medium text-gray-800">{user?.name}</p>
-               </div>
-               <button className="text-sm font-semibold text-blue-600 hover:text-blue-800 transition">Edit</button>
-            </div>
-            <div className="flex items-center space-x-4">
-               <div className="w-10 h-10 rounded-full bg-gray-50 flex items-center justify-center text-gray-400">
-                  <Mail size={20} />
-               </div>
-               <div className="flex-1">
-                  <p className="text-sm font-semibold text-gray-500">Email Address</p>
-                  <p className="font-medium text-gray-800">{user?.email}</p>
-               </div>
-               <button className="text-sm font-semibold text-blue-600 hover:text-blue-800 transition">Update</button>
-            </div>
-          </div>
-        </div>
+          <form onSubmit={handleSave} className="p-6 space-y-6">
+            {message && (
+              <div className="p-3 rounded-lg bg-green-50 border border-green-200 text-sm text-green-700">
+                {message}
+              </div>
+            )}
+            {error && (
+              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
+                {error}
+              </div>
+            )}
 
-        <div className="bg-orange-50 rounded-xl border border-orange-200 p-5 flex items-start space-x-4">
-           <AlertCircle className="text-orange-500 mt-0.5 flex-shrink-0" size={24} />
-           <div>
-             <h4 className="font-bold text-orange-800 text-sm">Demo Restrictions</h4>
-             <p className="text-sm text-orange-700 mt-1 leading-relaxed">
-               Because this is a demonstration environment, profile editing and password changes are currently disabled. You can view your current settings above.
-             </p>
-           </div>
+            <div className="flex items-center space-x-4 border-b border-gray-50 pb-4">
+              <div className="w-10 h-10 rounded-full bg-gray-50 flex items-center justify-center text-gray-400">
+                <User size={20} />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-gray-500">Full Name</p>
+                <input
+                  type="text"
+                  className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-4 border-b border-gray-50 pb-4">
+              <div className="w-10 h-10 rounded-full bg-gray-50 flex items-center justify-center text-gray-400">
+                <Shield size={20} />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-gray-500">Role</p>
+                <select
+                  className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  value={role}
+                  onChange={(e) => setRole(e.target.value)}
+                >
+                  <option value="admin">Admin</option>
+                  <option value="manager">Manager</option>
+                  <option value="developer">Developer</option>
+                  <option value="viewer">Viewer</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-4">
+              <div className="w-10 h-10 rounded-full bg-gray-50 flex items-center justify-center text-gray-400">
+                <Mail size={20} />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-gray-500">Email Address</p>
+                <input
+                  type="email"
+                  className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-500 cursor-not-allowed"
+                  value={user?.email || ''}
+                  disabled
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="submit"
+                disabled={saving}
+                className="px-5 py-2.5 rounded-lg font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed shadow-sm"
+              >
+                {saving ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          </form>
         </div>
 
       </div>
