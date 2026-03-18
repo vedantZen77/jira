@@ -49,10 +49,17 @@ const issueSchema = new mongoose.Schema(
     storyPoints: {
       type: Number,
     },
+    completedAt: {
+      type: Date,
+    },
   },
   {
     timestamps: true,
   }
 );
+
+issueSchema.index({ projectId: 1, status: 1 });
+issueSchema.index({ assignee: 1, status: 1 });
+issueSchema.index({ completedAt: 1 });
 
 module.exports = mongoose.model('Issue', issueSchema);

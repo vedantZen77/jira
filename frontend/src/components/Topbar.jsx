@@ -1,13 +1,16 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useContext, useState, useEffect, useRef } from 'react';
 import { Bell, CheckCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
+import { AuthContext } from '../context/AuthContext';
+import { connectSocket, joinUserRoom } from '../utils/socket';
 
 const Topbar = ({ title }) => {
   const [notifications, setNotifications] = useState([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const navigate = useNavigate();
   const dropdownRef = useRef(null);
+  const { user } = useContext(AuthContext);
 
   const fetchNotifications = async () => {
     try {
@@ -20,9 +23,27 @@ const Topbar = ({ title }) => {
 
   useEffect(() => {
     fetchNotifications();
-    const interval = setInterval(fetchNotifications, 30000); // poll every 30s
-    return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (!user?._id) return;
+    const s = connectSocket();
+    joinUserRoom(user._id);
+
+    const onNotification = ({ notification }) => {
+      if (!notification) return;
+      setNotifications((prev) => [notification, ...prev].slice(0, 50));
+    };
+
+    s.on('notification:new', onNotification);
+
+    const onPresence = () => {};
+    s.on('presence:update', onPresence);
+    return () => {
+      s.off('notification:new', onNotification);
+      s.off('presence:update', onPresence);
+    };
+  }, [user?._id]);
 
   // Close dropdown when clicking outside
   useEffect(() => {

@@ -23,6 +23,12 @@ const projectSchema = new mongoose.Schema(
       ref: 'User',
       required: true,
     },
+    leads: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+      },
+    ],
     members: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -34,5 +40,7 @@ const projectSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+projectSchema.index({ key: 1 }, { unique: true });
 
 module.exports = mongoose.model('Project', projectSchema);

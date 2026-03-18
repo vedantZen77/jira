@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useContext } from 'react';
 import api from '../utils/api';
 import { AuthContext } from '../context/AuthContext';
-import { X, MessageSquare, Send } from 'lucide-react';
+import { X, MessageSquare, Send, Calendar } from 'lucide-react';
 
 const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
   const { user } = useContext(AuthContext);
@@ -11,6 +11,19 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
   const [comments, setComments] = useState([]);
   const [newComment, setNewComment] = useState('');
   const [loading, setLoading] = useState(false);
+
+  const getUrgencyStyles = () => {
+    const dueOverdue = issue?.dueDate && new Date(issue.dueDate).getTime() < Date.now() && issue.status !== 'Done';
+    if (dueOverdue) return { header: 'bg-red-50 border-red-100', badge: 'bg-red-100 text-red-700' };
+    switch (issue?.priority) {
+      case 'Critical': return { header: 'bg-rose-50 border-rose-100', badge: 'bg-rose-100 text-rose-700' };
+      case 'High': return { header: 'bg-orange-50 border-orange-100', badge: 'bg-orange-100 text-orange-700' };
+      case 'Medium': return { header: 'bg-blue-50 border-blue-100', badge: 'bg-blue-100 text-blue-700' };
+      case 'Low': return { header: 'bg-gray-50 border-gray-100', badge: 'bg-gray-200 text-gray-700' };
+      default: return { header: 'bg-gray-50 border-gray-100', badge: 'bg-gray-200 text-gray-700' };
+    }
+  };
+  const urgency = getUrgencyStyles();
 
   const availableMembers = project ? [project.createdBy, ...project.members] : [];
 
@@ -42,6 +55,32 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
     }
   };
 
+  const handlePriorityChange = async (priority) => {
+    try {
+      setLoading(true);
+      const { data } = await api.patch(`/issues/${issue._id}/priority`, { priority });
+      onUpdate(data);
+      setEditedIssue((prev) => ({ ...prev, priority: data.priority }));
+    } catch (err) {
+      alert('Failed to update priority');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDueDateChange = async (dueDate) => {
+    try {
+      setLoading(true);
+      const { data } = await api.patch(`/issues/${issue._id}/due-date`, { dueDate });
+      onUpdate(data);
+      setEditedIssue((prev) => ({ ...prev, dueDate: data.dueDate }));
+    } catch (err) {
+      alert('Failed to update due date');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleAddComment = async (e) => {
     e.preventDefault();
     if (!newComment.trim()) return;
@@ -59,9 +98,9 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden relative">
         
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-gray-50">
+        <div className={`flex items-center justify-between px-6 py-4 border-b ${urgency.header}`}>
           <div className="flex items-center space-x-3">
-            <span className="text-sm font-bold text-gray-500 bg-gray-200 px-2 py-1 rounded">
+            <span className={`text-sm font-bold px-2 py-1 rounded ${urgency.badge}`}>
               {project.key}-{issue._id.slice(-4).toUpperCase()}
             </span>
             {editMode ? (
@@ -192,19 +231,28 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
 
               <div>
                 <label className="text-xs font-semibold text-gray-500 uppercase">Priority</label>
-                {editMode ? (
-                  <select 
-                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded bg-white text-sm"
-                    value={editedIssue.priority}
-                    onChange={(e) => setEditedIssue({...editedIssue, priority: e.target.value})}
-                  >
-                    {['Low', 'Medium', 'High', 'Critical'].map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                ) : (
-                   <div className="mt-1 font-medium text-gray-800 text-sm flex items-center">
-                     {issue.priority}
-                   </div>
-                )}
+                <select 
+                  className="w-full mt-1 px-3 py-2 border border-gray-300 rounded bg-white text-sm"
+                  value={editedIssue.priority}
+                  onChange={(e) => handlePriorityChange(e.target.value)}
+                  disabled={loading}
+                >
+                  {['Low', 'Medium', 'High', 'Critical'].map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-gray-500 uppercase">Due Date</label>
+                <div className="mt-1 relative">
+                  <Calendar className="absolute left-3 top-2.5 text-gray-400" size={16} />
+                  <input
+                    type="date"
+                    className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded bg-white text-sm"
+                    value={editedIssue.dueDate ? new Date(editedIssue.dueDate).toISOString().slice(0, 10) : ''}
+                    onChange={(e) => handleDueDateChange(e.target.value || null)}
+                    disabled={loading}
+                  />
+                </div>
               </div>
 
               <div>

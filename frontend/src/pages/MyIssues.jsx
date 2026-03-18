@@ -146,7 +146,11 @@ const MyIssues = () => {
                 {filteredIssues.map(issue => (
                   <tr
                     key={issue._id}
-                    className="hover:bg-gray-50 transition group cursor-pointer"
+                    className={`hover:bg-gray-50 transition group cursor-pointer ${
+                      issue.dueDate && new Date(issue.dueDate).getTime() < Date.now() && issue.status !== 'Done'
+                        ? 'bg-red-50'
+                        : ''
+                    }`}
                     onClick={() => {
                       setSelectedIssue(issue);
                       setSelectedProject(issue.projectObj);

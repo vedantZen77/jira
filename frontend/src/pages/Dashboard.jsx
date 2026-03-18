@@ -18,9 +18,13 @@ const Dashboard = () => {
   const [deletingId, setDeletingId] = useState(null);
 
   const isLead = (project) => {
-    return project.createdBy && project.createdBy.toString
-      ? project.createdBy.toString() === user?._id
-      : project.createdBy === user?._id || project.createdBy?._id === user?._id;
+    if (!project || !user?._id) return false;
+    if (project.createdBy && project.createdBy.toString) {
+      if (project.createdBy.toString() === user._id) return true;
+    }
+    if (project.createdBy?._id === user._id) return true;
+    const leads = Array.isArray(project.leads) ? project.leads : [];
+    return leads.some((l) => (l?.toString ? l.toString() === user._id : l?._id === user._id));
   };
 
   const fetchProjects = async () => {
@@ -169,8 +173,31 @@ const Dashboard = () => {
                 
                 <div className="flex items-center justify-between mt-auto border-t border-gray-100 pt-4">
                    <div className="flex -space-x-2">
-                      <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold border-2 border-white z-10">{user?.name?.charAt(0)}</div>
-                      {project.members.length > 0 && <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 text-xs font-bold border-2 border-white z-0">+{project.members.length}</div>}
+                      <div
+                        className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold border-2 border-white z-10"
+                        title={user?.name || 'You'}
+                      >
+                        {user?.name?.charAt(0)}
+                      </div>
+                      {Array.isArray(project.members) && project.members.slice(0, 3).map((m, idx) => (
+                        <div
+                          key={m._id || idx}
+                          className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-700 text-xs font-bold border-2 border-white"
+                          title={m?.name || 'Member'}
+                          style={{ zIndex: 9 - idx }}
+                        >
+                          {(m?.name || '?').charAt(0)}
+                        </div>
+                      ))}
+                      {Array.isArray(project.members) && project.members.length > 3 && (
+                        <div
+                          className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 text-[11px] font-bold border-2 border-white"
+                          title={project.members.slice(3).map(m => m?.name).filter(Boolean).join(', ') || 'More members'}
+                          style={{ zIndex: 1 }}
+                        >
+                          +{project.members.length - 3}
+                        </div>
+                      )}
                    </div>
                    <Link
                      to={`/project/${project._id}`}

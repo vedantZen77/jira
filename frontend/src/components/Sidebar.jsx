@@ -1,6 +1,7 @@
 import React, { useContext, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
+import { getAvatarUrl } from '../utils/avatar';
 import {
   LayoutDashboard,
   Folders,
@@ -25,6 +26,7 @@ const Sidebar = () => {
     { name: 'Dashboard', path: '/dashboard', icon: <LayoutDashboard size={20} /> },
     { name: 'Projects', path: '/projects', icon: <Folders size={20} /> },
     { name: 'My Issues', path: '/issues/me', icon: <CheckSquare size={20} /> },
+    { name: 'Analytics', path: '/analytics', icon: <LayoutDashboard size={20} /> },
     { name: 'Settings', path: '/settings', icon: <Settings size={20} /> },
   ];
 
@@ -63,8 +65,13 @@ const Sidebar = () => {
           </nav>
 
           <div className="flex items-center px-4 -mx-2 mb-4">
-            <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold text-lg">
-              {user?.name?.charAt(0).toUpperCase()}
+            <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center">
+              <img
+                src={getAvatarUrl(user?._id || user?.email || user?.name)}
+                alt={user?.name || 'User avatar'}
+                className="w-10 h-10"
+                referrerPolicy="no-referrer"
+              />
             </div>
             <div className="mx-2">
               <h4 className="mx-2 font-medium text-white">{user?.name}</h4>

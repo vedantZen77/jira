@@ -1,15 +1,21 @@
 import React, { useContext, useState } from 'react';
 import Layout from '../components/Layout';
 import { AuthContext } from '../context/AuthContext';
-import { User, Mail, Shield, AlertCircle } from 'lucide-react';
+import { User, Mail, Shield, KeyRound } from 'lucide-react';
 
 const Settings = () => {
-  const { user, updateProfile } = useContext(AuthContext);
+  const { user, updateProfile, changePassword } = useContext(AuthContext);
   const [name, setName] = useState(user?.name || '');
   const [role, setRole] = useState(user?.role || 'developer');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [pwCurrent, setPwCurrent] = useState('');
+  const [pwNew, setPwNew] = useState('');
+  const [pwConfirm, setPwConfirm] = useState('');
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwMessage, setPwMessage] = useState('');
+  const [pwError, setPwError] = useState('');
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -23,6 +29,29 @@ const Settings = () => {
       setError(err);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleChangePassword = async (e) => {
+    e.preventDefault();
+    setPwSaving(true);
+    setPwMessage('');
+    setPwError('');
+    if (pwNew !== pwConfirm) {
+      setPwError('New password and confirm password do not match');
+      setPwSaving(false);
+      return;
+    }
+    try {
+      await changePassword(pwCurrent, pwNew);
+      setPwMessage('Password updated successfully.');
+      setPwCurrent('');
+      setPwNew('');
+      setPwConfirm('');
+    } catch (err) {
+      setPwError(err);
+    } finally {
+      setPwSaving(false);
     }
   };
 
@@ -114,6 +143,72 @@ const Settings = () => {
                 className="px-5 py-2.5 rounded-lg font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed shadow-sm"
               >
                 {saving ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="p-6 border-b border-gray-100 flex items-center space-x-3">
+            <div className="w-10 h-10 rounded-full bg-gray-50 flex items-center justify-center text-gray-400">
+              <KeyRound size={20} />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-gray-800">Change password</h3>
+              <p className="text-sm text-gray-500">Update your password securely.</p>
+            </div>
+          </div>
+          <form onSubmit={handleChangePassword} className="p-6 space-y-4">
+            {pwMessage && (
+              <div className="p-3 rounded-lg bg-green-50 border border-green-200 text-sm text-green-700">
+                {pwMessage}
+              </div>
+            )}
+            {pwError && (
+              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
+                {pwError}
+              </div>
+            )}
+
+            <div>
+              <label className="block text-sm font-semibold text-gray-600 mb-1">Current password</label>
+              <input
+                type="password"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={pwCurrent}
+                onChange={(e) => setPwCurrent(e.target.value)}
+                required
+              />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-600 mb-1">New password</label>
+                <input
+                  type="password"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={pwNew}
+                  onChange={(e) => setPwNew(e.target.value)}
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-600 mb-1">Confirm new password</label>
+                <input
+                  type="password"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={pwConfirm}
+                  onChange={(e) => setPwConfirm(e.target.value)}
+                  required
+                />
+              </div>
+            </div>
+            <div className="flex justify-end pt-2">
+              <button
+                type="submit"
+                disabled={pwSaving}
+                className="px-5 py-2.5 rounded-lg font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed shadow-sm"
+              >
+                {pwSaving ? 'Updating...' : 'Update Password'}
               </button>
             </div>
           </form>

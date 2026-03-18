@@ -7,6 +7,7 @@ const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   
   const { login, user } = useContext(AuthContext);
   const navigate = useNavigate();
@@ -19,11 +20,15 @@ const Login = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setSubmitting(true);
+    setError('');
     try {
       await login(email, password);
       // Navigate is handled by useEffect
     } catch (err) {
       setError(err);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -74,9 +79,10 @@ const Login = () => {
 
           <button
             type="submit"
-            className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 focus:ring-blue-500 focus:ring-offset-blue-200 text-white w-full transition ease-in duration-200 text-center text-base font-semibold shadow-md focus:outline-none focus:ring-2 focus:ring-offset-2 rounded-lg"
+            disabled={submitting}
+            className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 focus:ring-blue-500 focus:ring-offset-blue-200 text-white w-full transition ease-in duration-200 text-center text-base font-semibold shadow-md focus:outline-none focus:ring-2 focus:ring-offset-2 rounded-lg disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            Sign In
+            {submitting ? 'Signing in...' : 'Sign In'}
           </button>
         </form>
 

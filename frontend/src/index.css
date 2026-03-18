@@ -1,1 +1,10 @@
 @import "tailwindcss";
+
+/* Hide scrollbars but keep scroll behavior */
+.scrollbar-hide {
+  -ms-overflow-style: none; /* IE and Edge legacy */
+  scrollbar-width: none; /* Firefox */
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none; /* Chrome, Safari */
+}
