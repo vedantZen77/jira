@@ -71,7 +71,7 @@ const ProjectBoard = () => {
   const [selectedLeadIds, setSelectedLeadIds] = useState([]);
   const [selectedIssue, setSelectedIssue] = useState(null);
   const [newIssue, setNewIssue] = useState({
-    title: '', description: '', issueType: 'Task', priority: 'Medium', assignee: ''
+    title: '', description: '', issueType: 'Task', priority: 'Medium', assignee: '', status: 'Todo'
   });
   const [draggingIssueId, setDraggingIssueId] = useState(null);
 
@@ -168,11 +168,16 @@ const ProjectBoard = () => {
     try {
       await api.post('/issues', { ...newIssue, projectId: id });
       setIsCreateModalOpen(false);
-      setNewIssue({ title: '', description: '', issueType: 'Task', priority: 'Medium' });
+      setNewIssue({ title: '', description: '', issueType: 'Task', priority: 'Medium', assignee: '', status: 'Todo' });
       fetchProjectData();
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to create issue');
     }
+  };
+
+  const openCreateForStatus = (status) => {
+    setNewIssue((prev) => ({ ...prev, status }));
+    setIsCreateModalOpen(true);
   };
 
   const handleDragStart = (issueId) => {
@@ -450,18 +455,30 @@ const ProjectBoard = () => {
                     return (
                       <div
                         key={`${lane.key}:${status}`}
-                        className="flex flex-col bg-gray-100 rounded-xl min-w-[320px] max-w-[320px] p-4 border border-gray-200 h-[calc(100vh-420px)] overflow-hidden"
+                        className="flex flex-col bg-gray-100 rounded-xl min-w-[280px] max-w-[280px] p-3 border border-gray-200 min-h-[480px] h-[calc(100vh-300px)] max-h-[720px] overflow-hidden"
                         onDragOver={handleDragOver}
                         onDrop={() => handleDrop(status)}
                       >
-                        <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center justify-between mb-3">
                           <div className="flex items-center space-x-2">
                             <span className={`px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider ${getStatusColor(status)}`}>
                               {status}
                             </span>
                             <span className="text-gray-500 text-sm font-semibold">{columnIssues.length}</span>
                           </div>
-                          <button className="text-gray-400 hover:text-gray-700"><MoreHorizontal size={20} /></button>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => openCreateForStatus(status)}
+                              className="inline-flex items-center justify-center h-8 w-8 rounded-lg text-gray-500 hover:text-blue-700 hover:bg-white transition"
+                              title="Add ticket"
+                            >
+                              <Plus size={18} />
+                            </button>
+                            <button className="inline-flex items-center justify-center h-8 w-8 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-white transition" title="Column options">
+                              <MoreHorizontal size={18} />
+                            </button>
+                          </div>
                         </div>
 
                         <div className="flex flex-col gap-3 overflow-y-auto pr-1 pb-2 flex-1 min-h-0 scrollbar-hide">
@@ -470,18 +487,18 @@ const ProjectBoard = () => {
                               key={issue._id}
                               draggable
                               onDragStart={() => handleDragStart(issue._id)}
-                              className={`bg-white p-4 rounded-xl shadow-sm border border-gray-200 border-l-4 ${getCardAccent(issue)} hover:shadow-md cursor-pointer transition flex flex-col group relative`}
+                              className={`bg-white p-3 rounded-xl shadow-sm border border-gray-200 border-l-4 ${getCardAccent(issue)} hover:shadow-md cursor-pointer transition flex flex-col group relative`}
                               onClick={() => setSelectedIssue(issue)}
                             >
                               <div className="text-xs font-semibold text-gray-500 tracking-wide mb-1 flex items-center justify-between">
                                 {project.key}-{issue._id.slice(-4).toUpperCase()}
                                 <span className="text-[10px] px-1.5 py-0.5 bg-gray-100 rounded text-gray-600">{issue.issueType}</span>
                               </div>
-                              <h4 className="text-gray-900 font-semibold leading-tight line-clamp-2 mb-3">
+                              <h4 className="text-gray-900 font-semibold leading-tight line-clamp-2 mb-2 text-sm">
                                 {issue.title}
                               </h4>
                               {issue.dueDate && (
-                                <div className={`text-xs mb-3 ${
+                                <div className={`text-xs mb-2 ${
                                   new Date(issue.dueDate).getTime() < Date.now() && issue.status !== 'Done'
                                     ? 'text-red-600 font-semibold'
                                     : 'text-gray-500'
@@ -520,10 +537,16 @@ const ProjectBoard = () => {
                           ))}
                           
                           {columnIssues.length === 0 && (
-                            <div className="w-full py-8 flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg text-gray-400">
-                              <Plus size={24} className="mb-2 opacity-50" />
-                              <span className="text-sm font-medium">Drop tickets here</span>
-                            </div>
+                            <button
+                              type="button"
+                              onClick={() => openCreateForStatus(status)}
+                              className="w-full py-10 flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg text-gray-400 hover:text-gray-600 hover:border-gray-400 hover:bg-white/60 transition"
+                              title="Add ticket"
+                            >
+                              <Plus size={26} className="mb-2 opacity-60" />
+                              <span className="text-sm font-semibold">Drop tickets here</span>
+                              <span className="text-xs mt-1 text-gray-400 font-medium">or click to add</span>
+                            </button>
                           )}
                         </div>
                       </div>
