@@ -9,7 +9,6 @@ const projectSchema = new mongoose.Schema(
     key: {
       type: String,
       required: [true, 'Please add a project key'],
-      unique: true,
       uppercase: true,
       trim: true,
       minlength: 2,
@@ -40,7 +39,5 @@ const projectSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
-
-projectSchema.index({ key: 1 }, { unique: true });
 
 module.exports = mongoose.model('Project', projectSchema);

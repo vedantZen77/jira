@@ -69,10 +69,6 @@ const createProject = async (req, res) => {
     const createdProject = await project.save();
     res.status(201).json(createdProject);
   } catch (error) {
-    // Handle duplicate key (Mongo unique index)
-    if (error && (error.code === 11000 || error.code === 11001)) {
-      return res.status(400).json({ message: 'Project key already exists. Please choose a different key.' });
-    }
     res.status(400).json({ message: error.message });
   }
 };
