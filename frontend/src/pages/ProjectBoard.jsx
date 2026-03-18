@@ -466,19 +466,9 @@ const ProjectBoard = () => {
                             </span>
                             <span className="text-gray-500 text-sm font-semibold">{columnIssues.length}</span>
                           </div>
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => openCreateForStatus(status)}
-                              className="inline-flex items-center justify-center h-8 w-8 rounded-lg text-gray-500 hover:text-blue-700 hover:bg-white transition"
-                              title="Add ticket"
-                            >
-                              <Plus size={18} />
-                            </button>
-                            <button className="inline-flex items-center justify-center h-8 w-8 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-white transition" title="Column options">
-                              <MoreHorizontal size={18} />
-                            </button>
-                          </div>
+                          <button className="inline-flex items-center justify-center h-8 w-8 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-white transition" title="Column options">
+                            <MoreHorizontal size={18} />
+                          </button>
                         </div>
 
                         <div className="flex flex-col gap-3 overflow-y-auto pr-1 pb-2 flex-1 min-h-0 scrollbar-hide">
