@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useContext } from 'react';
 import api from '../utils/api';
 import { AuthContext } from '../context/AuthContext';
-import { X, MessageSquare, Send, Calendar } from 'lucide-react';
+import { X, MessageSquare, Send, Calendar, Trash2 } from 'lucide-react';
 
 const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
   const { user } = useContext(AuthContext);
@@ -25,7 +25,34 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
   };
   const urgency = getUrgencyStyles();
 
-  const availableMembers = project ? [project.createdBy, ...project.members] : [];
+  const availableMembers = (() => {
+    if (!project) return [];
+    const all = [project.createdBy, ...(project.members || []), ...(project.leads || [])].filter(Boolean);
+    const byId = new Map();
+    all.forEach((u) => {
+      const id = u?._id || u;
+      if (!id) return;
+      const key = String(id);
+      if (!byId.has(key)) byId.set(key, u);
+    });
+    return Array.from(byId.values());
+  })();
+
+  const isIssueCreator = String(issue?.reporter?._id || issue?.reporter) === String(user?._id);
+
+  const handleDeleteIssue = async () => {
+    if (!isIssueCreator) return;
+    if (!window.confirm('Delete this ticket? This cannot be undone.')) return;
+    try {
+      setLoading(true);
+      await api.delete(`/issues/${issue._id}`);
+      onClose?.();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to delete issue');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (activeTab === 'comments') {
@@ -310,6 +337,22 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
                   <span className="text-sm font-medium text-gray-800">{issue.reporter?.name || 'Unknown'}</span>
                 </div>
               </div>
+
+              {isIssueCreator && (
+                <div className="pt-4 border-t border-gray-200 mt-4">
+                  <label className="text-xs font-semibold text-gray-500 uppercase">Danger Zone</label>
+                  <button
+                    type="button"
+                    onClick={handleDeleteIssue}
+                    disabled={loading}
+                    className="mt-3 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                    title="Only the ticket creator can delete"
+                  >
+                    <Trash2 size={16} />
+                    Delete Ticket
+                  </button>
+                </div>
+              )}
               
             </div>
             

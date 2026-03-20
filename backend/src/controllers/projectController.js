@@ -1,4 +1,6 @@
 const Project = require('../models/Project');
+const Issue = require('../models/Issue');
+const { getIO } = require('../socket');
 
 const isLead = (project, userId) => {
   if (!project || !userId) return false;
@@ -194,6 +196,16 @@ const deleteProject = async (req, res) => {
     if (!isLead(project, req.user._id)) {
       return res.status(401).json({ message: 'User not authorized' });
     }
+
+    // Delete all issues that belong to this project so analytics stays correct.
+    const issues = await Issue.find({ projectId: project._id }, '_id');
+    await Issue.deleteMany({ projectId: project._id });
+    // Notify any connected boards to remove deleted tickets immediately.
+    try {
+      const io = getIO();
+      const issueIds = issues.map((i) => i._id);
+      issueIds.forEach((issueId) => io.to(`project:${project._id}`).emit('issue:deleted', { issueId: String(issueId) }));
+    } catch (e) {}
 
     await project.deleteOne();
     res.json({ message: 'Project removed' });

@@ -226,6 +226,12 @@ const deleteIssue = async (req, res) => {
       return res.status(404).json({ message: 'Issue not found' });
     }
 
+    const reporterId = issue.reporter?.toString();
+    const requesterId = req.user?._id?.toString();
+    if (!reporterId || !requesterId || reporterId !== requesterId) {
+      return res.status(403).json({ message: 'Only the ticket creator can delete this ticket.' });
+    }
+
     const projectId = issue.projectId;
     const issueId = issue._id;
     await issue.deleteOne();

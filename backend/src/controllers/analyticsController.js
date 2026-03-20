@@ -5,11 +5,16 @@ const Issue = require('../models/Issue');
 const summary = async (req, res) => {
   try {
     const now = new Date();
+    const match = req.query.projectId ? { projectId: req.query.projectId } : {};
     const [total, done, open, overdue] = await Promise.all([
-      Issue.countDocuments({}),
-      Issue.countDocuments({ status: 'Done' }),
-      Issue.countDocuments({ status: { $ne: 'Done' } }),
-      Issue.countDocuments({ status: { $ne: 'Done' }, dueDate: { $type: 'date', $lt: now } }),
+      Issue.countDocuments(match),
+      Issue.countDocuments({ ...match, status: 'Done' }),
+      Issue.countDocuments({ ...match, status: { $ne: 'Done' } }),
+      Issue.countDocuments({
+        ...match,
+        status: { $ne: 'Done' },
+        dueDate: { $type: 'date', $lt: now },
+      }),
     ]);
     res.json({ total, done, open, overdue });
   } catch (error) {
@@ -21,8 +26,12 @@ const summary = async (req, res) => {
 // Count issues completed per day (based on completedAt)
 const tasksPerDay = async (req, res) => {
   try {
+    const match = {
+      completedAt: { $type: 'date' },
+      ...(req.query.projectId ? { projectId: req.query.projectId } : {}),
+    };
     const data = await Issue.aggregate([
-      { $match: { completedAt: { $type: 'date' } } },
+      { $match: match },
       {
         $group: {
           _id: {
@@ -54,7 +63,13 @@ const tasksPerDay = async (req, res) => {
 // Status distribution
 const statusDistribution = async (req, res) => {
   try {
+    const match = {
+      ...(req.query.projectId ? { projectId: req.query.projectId } : {}),
+    };
+    if (req.query.state === 'open') match.status = { $ne: 'Done' };
+    if (req.query.state === 'closed') match.status = 'Done';
     const data = await Issue.aggregate([
+      { $match: match },
       { $group: { _id: '$status', count: { $sum: 1 } } },
       { $project: { _id: 0, status: '$_id', count: 1 } },
       { $sort: { status: 1 } },
@@ -69,8 +84,12 @@ const statusDistribution = async (req, res) => {
 // Average completion time in hours (completedAt - createdAt)
 const avgCompletionTime = async (req, res) => {
   try {
+    const match = {
+      completedAt: { $type: 'date' },
+      ...(req.query.projectId ? { projectId: req.query.projectId } : {}),
+    };
     const data = await Issue.aggregate([
-      { $match: { completedAt: { $type: 'date' } } },
+      { $match: match },
       {
         $project: {
           diffMs: { $subtract: ['$completedAt', '$createdAt'] },
@@ -99,12 +118,19 @@ const avgCompletionTime = async (req, res) => {
 // Open issues per assignee
 const workloadPerUser = async (req, res) => {
   try {
+    const match = {
+      ...(req.query.projectId ? { projectId: req.query.projectId } : {}),
+    };
+    if (req.query.state === 'open') match.status = { $ne: 'Done' };
+    if (req.query.state === 'closed') match.status = 'Done';
     const data = await Issue.aggregate([
-      { $match: { status: { $ne: 'Done' } } },
+      { $match: match },
       {
         $group: {
           _id: '$assignee',
-          count: { $sum: 1 },
+          openCount: { $sum: { $cond: [{ $ne: ['$status', 'Done'] }, 1, 0] } },
+          doneCount: { $sum: { $cond: [{ $eq: ['$status', 'Done'] }, 1, 0] } },
+          totalCount: { $sum: 1 },
         },
       },
       {
@@ -122,10 +148,12 @@ const workloadPerUser = async (req, res) => {
           userId: '$_id',
           name: '$user.name',
           email: '$user.email',
-          count: 1,
+          openCount: 1,
+          doneCount: 1,
+          totalCount: 1,
         },
       },
-      { $sort: { count: -1 } },
+      { $sort: { totalCount: -1 } },
     ]);
     res.json(data);
   } catch (error) {

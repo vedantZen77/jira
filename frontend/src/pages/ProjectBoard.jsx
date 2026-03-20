@@ -233,7 +233,18 @@ const ProjectBoard = () => {
     return titleMatch || assigneeMatch || ticketMatch;
   });
 
-  const availableMembers = project ? [project.createdBy, ...project.members] : [];
+  const availableMembers = (() => {
+    if (!project) return [];
+    const all = [project.createdBy, ...(project.members || []), ...(project.leads || [])].filter(Boolean);
+    const byId = new Map();
+    all.forEach((u) => {
+      const id = u?._id || u;
+      if (!id) return;
+      const key = String(id);
+      if (!byId.has(key)) byId.set(key, u);
+    });
+    return Array.from(byId.values());
+  })();
 
   // Stats calculation
   const totalIssues = issues.length;
