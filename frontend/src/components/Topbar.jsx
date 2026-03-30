@@ -22,8 +22,10 @@ const Topbar = ({ title }) => {
   };
 
   useEffect(() => {
+    if (!user?._id) return;
     fetchNotifications();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?._id]);
 
   useEffect(() => {
     if (!user?._id) return;

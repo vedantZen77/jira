@@ -9,9 +9,11 @@ const {
   deleteProject,
 } = require('../controllers/projectController');
 const { protect } = require('../middleware/authMiddleware');
+const { applyTemplateToProject } = require('../controllers/templateController');
 
 router.route('/').get(protect, getProjects).post(protect, createProject);
 router.put('/:id/leads', protect, updateProjectLeads);
+router.post('/:projectId/templates/apply', protect, applyTemplateToProject);
 router
   .route('/:id')
   .get(protect, getProjectById)

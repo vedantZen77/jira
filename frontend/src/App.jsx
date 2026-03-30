@@ -9,6 +9,7 @@ import Projects from './pages/Projects';
 import MyIssues from './pages/MyIssues';
 import Settings from './pages/Settings';
 import Analytics from './pages/Analytics';
+import TaskTemplates from './pages/TaskTemplates';
 
 // Simple protected route wrapper
 const ProtectedRoute = ({ children }) => {
@@ -32,6 +33,7 @@ function App() {
               <Route path="/issues/me" element={<ProtectedRoute><MyIssues /></ProtectedRoute>} />
               <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
               <Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
+              <Route path="/templates" element={<ProtectedRoute><TaskTemplates /></ProtectedRoute>} />
               <Route path="/project/:id" element={<ProtectedRoute><ProjectBoard /></ProtectedRoute>} />
               <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             </Routes>

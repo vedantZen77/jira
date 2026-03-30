@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useRef } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import Layout from '../components/Layout';
 import api from '../utils/api';
 import { CheckSquare, Search } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import TicketDetailsModal from '../components/TicketDetailsModal';
+import { connectSocket, joinUserRoom } from '../utils/socket';
 
 const MyIssues = () => {
   const { user } = useContext(AuthContext);
@@ -16,6 +17,7 @@ const MyIssues = () => {
   const [filterType, setFilterType] = useState('');
   const [selectedIssue, setSelectedIssue] = useState(null);
   const [selectedProject, setSelectedProject] = useState(null);
+  const selectedIssueRef = useRef(null);
 
   useEffect(() => {
     const fetchMyIssues = async () => {
@@ -29,9 +31,14 @@ const MyIssues = () => {
            allIssues = [...allIssues, ...annotatedIssues];
         }
         
-        const myTasks = allIssues.filter(i => 
-           (i.assignee?._id === user._id) || (i.reporter?._id === user._id)
-        );
+        const myTasks = allIssues.filter((i) => {
+          const reporterMatch = i.reporter?._id === user._id;
+          const assigneeMatch = i.assignee?._id === user._id;
+          const assigneesMatch = Array.isArray(i.assignees)
+            ? i.assignees.some((a) => (a?._id ? a._id === user._id : String(a) === String(user._id)))
+            : false;
+          return reporterMatch || assigneeMatch || assigneesMatch;
+        });
         
         setIssues(myTasks);
         setLoading(false);
@@ -42,6 +49,96 @@ const MyIssues = () => {
     
     if (user) fetchMyIssues();
   }, [user]);
+
+  useEffect(() => {
+    selectedIssueRef.current = selectedIssue;
+  }, [selectedIssue]);
+
+  // Real-time updates for created/updated/deleted issues
+  useEffect(() => {
+    if (!user?._id) return;
+
+    const s = connectSocket();
+    joinUserRoom(user._id);
+
+    const attachProjectObj = (issue) => {
+      if (issue?.projectObj) return issue;
+      if (issue?.projectId) {
+        const p = issue.projectId;
+        return { ...issue, projectObj: { _id: p._id || p, key: p.key, name: p.name } };
+      }
+      return issue;
+    };
+
+    const matchesMe = (issue) => {
+      const uid = String(user._id);
+      const reporterId = issue?.reporter?._id ? issue.reporter._id : issue?.reporter;
+      const assigneeId = issue?.assignee?._id ? issue.assignee._id : issue?.assignee;
+      const assignees = Array.isArray(issue?.assignees) ? issue.assignees : [];
+      const assigneesMatch = assignees.some((a) => {
+        const id = a?._id ? a._id : a;
+        return id && String(id) === uid;
+      });
+      return (reporterId && String(reporterId) === uid) || (assigneeId && String(assigneeId) === uid) || assigneesMatch;
+    };
+
+    const onIssueCreated = ({ issue }) => {
+      if (!issue) return;
+      if (!matchesMe(issue)) return;
+
+      const issueWithProject = attachProjectObj(issue);
+      setIssues((prev) => {
+        const exists = prev.some((i) => String(i._id) === String(issueWithProject._id));
+        if (exists) {
+          return prev.map((i) => (String(i._id) === String(issueWithProject._id) ? issueWithProject : i));
+        }
+        return [issueWithProject, ...prev];
+      });
+    };
+
+    const onIssueUpdated = ({ issue }) => {
+      if (!issue) return;
+
+      setIssues((prev) => {
+        const issueWithProject = attachProjectObj(issue);
+        const shouldExist = matchesMe(issueWithProject);
+        const exists = prev.some((i) => String(i._id) === String(issueWithProject._id));
+
+        if (!exists && shouldExist) return [issueWithProject, ...prev];
+        if (exists && shouldExist) return prev.map((i) => (String(i._id) === String(issueWithProject._id) ? issueWithProject : i));
+        if (exists && !shouldExist) return prev.filter((i) => String(i._id) !== String(issueWithProject._id));
+        return prev;
+      });
+
+      if (selectedIssueRef.current && String(selectedIssueRef.current._id) === String(issue._id)) {
+        setSelectedIssue(issue);
+        if (issue?.projectId) {
+          setSelectedProject({
+            _id: issue.projectId._id || issue.projectId,
+            key: issue.projectId.key,
+            name: issue.projectId.name,
+          });
+        }
+      }
+    };
+
+    const onIssueDeleted = ({ issueId }) => {
+      if (!issueId) return;
+      setIssues((prev) => prev.filter((i) => String(i._id) !== String(issueId)));
+      setSelectedIssue((prev) => (prev && String(prev._id) === String(issueId) ? null : prev));
+      setSelectedProject((prev) => prev);
+    };
+
+    s.on('issue:created', onIssueCreated);
+    s.on('issue:updated', onIssueUpdated);
+    s.on('issue:deleted', onIssueDeleted);
+
+    return () => {
+      s.off('issue:created', onIssueCreated);
+      s.off('issue:updated', onIssueUpdated);
+      s.off('issue:deleted', onIssueDeleted);
+    };
+  }, [user?._id]);
 
   const filteredIssues = issues.filter(issue => 
     issue.title.toLowerCase().includes(filterText.toLowerCase()) &&
@@ -153,7 +250,7 @@ const MyIssues = () => {
                     }`}
                     onClick={() => {
                       setSelectedIssue(issue);
-                      setSelectedProject(issue.projectObj);
+                      setSelectedProject(issue.projectObj || issue.projectId);
                     }}
                   >
                     <td className="py-4 px-4 font-medium text-gray-800">

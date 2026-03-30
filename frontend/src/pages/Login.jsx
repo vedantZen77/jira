@@ -38,7 +38,7 @@ const Login = () => {
         <div className="flex justify-center mb-6 text-blue-600">
           <LogIn size={48} />
         </div>
-        <h2 className="text-2xl font-bold text-center text-gray-800 mb-8">Sign in to Jira Clone</h2>
+        <h2 className="text-2xl font-bold text-center text-gray-800 mb-8">Sign in to Logger</h2>
         
         {error && (
           <div className="mb-4 p-3 bg-red-100 border-l-4 border-red-500 text-red-700 text-sm">

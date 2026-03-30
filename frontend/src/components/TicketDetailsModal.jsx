@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useRef } from 'react';
 import api from '../utils/api';
 import { AuthContext } from '../context/AuthContext';
-import { X, MessageSquare, Send, Calendar, Trash2 } from 'lucide-react';
+import { X, MessageSquare, Send, Calendar, MoreHorizontal } from 'lucide-react';
 
 const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
   const { user } = useContext(AuthContext);
@@ -11,6 +11,16 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
   const [comments, setComments] = useState([]);
   const [newComment, setNewComment] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Template integration (Add this ticket to a template)
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templates, setTemplates] = useState([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+  const [assigneeSelectId, setAssigneeSelectId] = useState('');
+  const actionsMenuRef = useRef(null);
 
   const getUrgencyStyles = () => {
     const dueOverdue = issue?.dueDate && new Date(issue.dueDate).getTime() < Date.now() && issue.status !== 'Done';
@@ -54,11 +64,116 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
     }
   };
 
+  const handleAddToTemplate = async () => {
+    if (!selectedTemplateId) {
+      alert('Select a template first');
+      return;
+    }
+    try {
+      setLoading(true);
+      await api.post(`/templates/${selectedTemplateId}/tickets`, { ticketId: issue._id });
+      alert('Added to template');
+      setSelectedTemplateId('');
+      setShowTemplatePicker(false);
+      setActionsOpen(false);
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to add to template');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const currentAssigneeObjs = (() => {
+    const raw =
+      Array.isArray(issue?.assignees) && issue.assignees.length > 0
+        ? issue.assignees
+        : issue?.assignee
+          ? [issue.assignee]
+          : [];
+
+    return raw
+      .map((a) => {
+        if (!a) return null;
+        if (a?._id) return a;
+        const id = a?._id || a;
+        const found = availableMembers.find((u) => String(u?._id || u) === String(id));
+        return found || null;
+      })
+      .filter(Boolean);
+  })();
+
+  const currentAssigneeIds = currentAssigneeObjs.map((u) => String(u._id));
+
+  const handleAssigneesUpdate = async (nextIds) => {
+    const normalized = Array.isArray(nextIds) ? nextIds.filter(Boolean).map(String) : [];
+    const payload = {
+      assignees: normalized,
+      assignee: normalized.length > 0 ? normalized[0] : null,
+    };
+    try {
+      setLoading(true);
+      const { data } = await api.put(`/issues/${issue._id}`, payload);
+      onUpdate(data);
+      setEditedIssue((prev) => ({ ...prev, ...data }));
+      setAssigneeSelectId('');
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to update assignees');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRemoveAssignee = (id) => {
+    const next = currentAssigneeIds.filter((x) => String(x) !== String(id));
+    handleAssigneesUpdate(next);
+  };
+
+  const handleAddAssignee = () => {
+    if (!assigneeSelectId) return;
+    const next = Array.from(new Set([...currentAssigneeIds, String(assigneeSelectId)]));
+    handleAssigneesUpdate(next);
+  };
+
   useEffect(() => {
     if (activeTab === 'comments') {
       fetchComments();
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    const loadTemplates = async () => {
+      if (!issue?._id || !project?._id) return;
+      setTemplatesLoading(true);
+      try {
+        const [globalRes, projectRes] = await Promise.all([
+          api.get('/templates', { params: { scope: 'global' } }),
+          api.get('/templates', { params: { scope: 'project', projectId: project._id } }),
+        ]);
+        const globalTemplates = Array.isArray(globalRes.data) ? globalRes.data : [];
+        const projectTemplates = Array.isArray(projectRes.data) ? projectRes.data : [];
+        setTemplates([...globalTemplates, ...projectTemplates]);
+      } catch (e) {
+        setTemplates([]);
+      } finally {
+        setTemplatesLoading(false);
+      }
+    };
+    loadTemplates();
+  }, [issue?._id, project?._id]);
+
+  // Close actions menu when clicking outside
+  useEffect(() => {
+    if (!actionsOpen) return;
+    const onDown = (e) => {
+      if (!actionsMenuRef.current) return;
+      if (!actionsMenuRef.current.contains(e.target)) {
+        setActionsOpen(false);
+        setShowTemplatePicker(false);
+      }
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [actionsOpen]);
 
   const fetchComments = async () => {
     try {
@@ -103,6 +218,28 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
       setEditedIssue((prev) => ({ ...prev, dueDate: data.dueDate }));
     } catch (err) {
       alert('Failed to update due date');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleChecklistToggle = async (index) => {
+    if (!Array.isArray(issue?.checklist)) return;
+    const source = editMode && Array.isArray(editedIssue?.checklist) ? editedIssue.checklist : issue.checklist;
+    const current = Array.isArray(source) ? source : [];
+    if (!current[index]) return;
+
+    const next = current.map((item, i) =>
+      i === index ? { ...item, completed: !item.completed } : item
+    );
+
+    try {
+      setLoading(true);
+      const { data } = await api.patch(`/issues/${issue._id}/checklist`, { checklist: next });
+      onUpdate(data);
+      setEditedIssue((prev) => ({ ...prev, checklist: data.checklist }));
+    } catch (err) {
+      alert('Failed to update checklist');
     } finally {
       setLoading(false);
     }
@@ -238,7 +375,58 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
 
           {/* Sidebar Area */}
           <div className="w-1/3 bg-gray-50 border-l border-gray-200 p-6 overflow-y-auto">
-            <h3 className="font-bold text-gray-800 mb-4 tracking-wide uppercase text-xs">Details</h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800 tracking-wide uppercase text-xs">Details</h3>
+              <div className="relative" ref={actionsMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActionsOpen((v) => !v);
+                    setShowTemplatePicker(false);
+                  }}
+                  className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-200 rounded-lg transition"
+                  title="Actions"
+                >
+                  <MoreHorizontal size={18} />
+                </button>
+                {actionsOpen && (
+                  <div className="absolute right-0 mt-2 w-52 rounded-xl shadow-2xl border border-gray-100 bg-white overflow-hidden z-50">
+                    <div className="px-3 py-2 text-xs font-semibold text-gray-500 border-b border-gray-100">
+                      Ticket actions
+                    </div>
+                    <div className="p-2 space-y-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowTemplatePicker(true);
+                          setActionsOpen(false);
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-lg hover:bg-gray-50 text-sm font-semibold text-gray-800 transition"
+                      >
+                        Add to Template
+                      </button>
+                      {isIssueCreator && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActionsOpen(false);
+                            handleDeleteIssue();
+                          }}
+                          className="w-full text-left px-3 py-2 rounded-lg hover:bg-red-50 text-sm font-semibold text-red-700 transition"
+                        >
+                          Delete Ticket
+                        </button>
+                      )}
+                      {!isIssueCreator && (
+                        <div className="px-3 py-2 text-xs text-gray-400">
+                          Only creator can delete.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
             
             <div className="space-y-4">
               <div>
@@ -300,32 +488,86 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
               </div>
 
               <div className="pt-4 border-t border-gray-200 mt-4">
-                <label className="text-xs font-semibold text-gray-500 uppercase">Assignee</label>
-                {editMode ? (
-                  <select 
-                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded bg-white text-sm"
-                    value={editedIssue.assignee?._id || editedIssue.assignee || ''}
-                    onChange={(e) => setEditedIssue({...editedIssue, assignee: e.target.value})}
-                  >
-                    <option value="">Unassigned</option>
-                    {availableMembers.map(m => (
-                      <option key={m._id} value={m._id}>{m.name}</option>
-                    ))}
-                  </select>
+                <label className="text-xs font-semibold text-gray-500 uppercase">Checklist</label>
+                <div className="mt-2 space-y-2">
+                  {Array.isArray(issue?.checklist) && issue.checklist.length > 0 ? (
+                    issue.checklist.map((item, idx) => (
+                      <label key={`${idx}-${item?.text || 'item'}`} className="flex items-start gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(item?.completed)}
+                          onChange={() => handleChecklistToggle(idx)}
+                          disabled={loading}
+                          className="mt-1 w-4 h-4 accent-blue-600"
+                        />
+                        <span
+                          className={`text-sm text-gray-700 leading-tight ${item?.completed ? 'line-through text-gray-400' : ''}`}
+                        >
+                          {item?.text}
+                        </span>
+                      </label>
+                    ))
+                  ) : (
+                    <div className="text-sm text-gray-400">No checklist</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-gray-200 mt-4">
+                <label className="text-xs font-semibold text-gray-500 uppercase">Assignees</label>
+                {currentAssigneeObjs.length === 0 ? (
+                  <div className="mt-2 text-sm italic text-gray-500">Unassigned</div>
                 ) : (
-                  <div className="flex items-center mt-2">
-                    {issue.assignee ? (
-                      <>
-                        <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-bold mr-2">
-                          {issue.assignee.name.charAt(0)}
-                        </div>
-                        <span className="text-sm font-medium text-gray-800">{issue.assignee.name}</span>
-                      </>
-                    ) : (
-                      <span className="text-sm italic text-gray-500">Unassigned</span>
-                    )}
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {currentAssigneeObjs.map((u) => (
+                      <div
+                        key={String(u._id)}
+                        className="flex items-center bg-gray-50 text-gray-700 px-2.5 py-1 rounded-full text-xs font-medium border border-gray-200"
+                      >
+                        <span className="w-4 h-4 rounded-full bg-gray-300 flex items-center justify-center mr-2 text-white font-bold">
+                          {u.name?.charAt(0) || '?'}
+                        </span>
+                        <span className="whitespace-nowrap">{u.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveAssignee(u._id)}
+                          className="ml-2 text-gray-400 hover:text-red-500 focus:outline-none"
+                          title="Remove assignee"
+                          aria-label="Remove assignee"
+                          disabled={loading}
+                        >
+                          &times;
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 )}
+
+                <div className="mt-3 flex items-center gap-2">
+                  <select
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    value={assigneeSelectId}
+                    onChange={(e) => setAssigneeSelectId(e.target.value)}
+                  >
+                    <option value="">Add person...</option>
+                    {availableMembers
+                      .filter((u) => !currentAssigneeIds.includes(String(u?._id)))
+                      .map((u) => (
+                        <option key={String(u._id)} value={u._id}>
+                          {u.name}
+                        </option>
+                      ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={handleAddAssignee}
+                    disabled={!assigneeSelectId || loading}
+                    className="px-3 py-2 rounded-lg font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Add assignee"
+                  >
+                    Add
+                  </button>
+                </div>
               </div>
 
               <div className="pt-4 border-t border-gray-200 mt-4">
@@ -338,19 +580,46 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
                 </div>
               </div>
 
-              {isIssueCreator && (
+              {showTemplatePicker && (
                 <div className="pt-4 border-t border-gray-200 mt-4">
-                  <label className="text-xs font-semibold text-gray-500 uppercase">Danger Zone</label>
-                  <button
-                    type="button"
-                    onClick={handleDeleteIssue}
-                    disabled={loading}
-                    className="mt-3 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
-                    title="Only the ticket creator can delete"
-                  >
-                    <Trash2 size={16} />
-                    Delete Ticket
-                  </button>
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    <label className="text-xs font-semibold text-gray-500 uppercase">Add to Template</label>
+                    <button
+                      type="button"
+                      onClick={() => setShowTemplatePicker(false)}
+                      className="text-xs text-gray-400 hover:text-gray-700"
+                      title="Close"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  {templatesLoading ? (
+                    <div className="text-sm text-gray-500">Loading templates...</div>
+                  ) : (
+                    <div className="mt-2 flex items-center gap-2">
+                      <select
+                        className="flex-1 px-3 py-2 border border-gray-300 rounded bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        value={selectedTemplateId}
+                        onChange={(e) => setSelectedTemplateId(e.target.value)}
+                      >
+                        <option value="">Select template...</option>
+                        {templates.map((t) => (
+                          <option key={t._id} value={t._id}>
+                            {t.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={handleAddToTemplate}
+                        disabled={!selectedTemplateId || loading || templatesLoading}
+                        className="px-4 py-2 rounded-lg font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                        title="Add this ticket to a template"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
               

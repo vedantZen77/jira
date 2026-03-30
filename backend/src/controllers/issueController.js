@@ -14,6 +14,7 @@ const getIssuesByProject = async (req, res) => {
 
     const issues = await Issue.find({ projectId: req.params.projectId })
       .populate('assignee', 'name email avatar')
+      .populate('assignees', 'name email avatar')
       .populate('reporter', 'name email avatar')
       .sort({ createdAt: -1 })
       .skip(skip)
@@ -32,6 +33,7 @@ const getIssueById = async (req, res) => {
   try {
     const issue = await Issue.findById(req.params.id)
       .populate('assignee', 'name email avatar')
+      .populate('assignees', 'name email avatar')
       .populate('reporter', 'name email avatar')
       .populate('projectId', 'name key');
 
@@ -58,6 +60,7 @@ const createIssue = async (req, res) => {
       priority,
       projectId,
       assignee,
+      assignees,
       labels,
       dueDate,
       storyPoints,
@@ -68,6 +71,13 @@ const createIssue = async (req, res) => {
       return res.status(404).json({ message: 'Project not found' });
     }
 
+    const assigneeIds = Array.isArray(assignees)
+      ? assignees
+      : assignee
+        ? [assignee]
+        : [];
+    const normalizedAssignees = assigneeIds.filter(Boolean);
+
     const issue = new Issue({
       title,
       description,
@@ -75,7 +85,8 @@ const createIssue = async (req, res) => {
       status,
       priority,
       projectId,
-      assignee,
+      assignee: normalizedAssignees.length > 0 ? normalizedAssignees[0] : null,
+      assignees: normalizedAssignees,
       labels,
       dueDate,
       storyPoints,
@@ -84,31 +95,48 @@ const createIssue = async (req, res) => {
 
     const createdIssue = await issue.save();
 
-    // Emit to board room so other users see it immediately
-    try {
-      const populatedIssue = await Issue.findById(createdIssue._id)
-        .populate('assignee', 'name email avatar')
-        .populate('reporter', 'name email avatar');
-      getIO().to(`project:${projectId}`).emit('issue:created', { issue: populatedIssue });
-    } catch (e) {}
-
-    // Create notification for assignee
-    if (assignee && assignee.toString() !== req.user._id.toString()) {
+    // Create notifications for all assignees
+    const uniqueAssignees = Array.from(new Set(normalizedAssignees.map(String)));
+    for (const aId of uniqueAssignees) {
+      if (String(aId) === String(req.user._id)) continue;
       const notification = await Notification.create({
-        user: assignee,
+        user: aId,
         type: 'ISSUE_ASSIGNED',
         message: `You have been assigned to a new issue: ${title}`,
-        link: `/project/${projectId}`
+        link: `/project/${projectId}`,
       });
       try {
-        getIO().to(`user:${assignee}`).emit('notification:new', { notification });
+        getIO().to(`user:${aId}`).emit('notification:new', { notification });
       } catch (e) {}
     }
 
     // Return populated issue for creator UI consistency
     const populated = await Issue.findById(createdIssue._id)
       .populate('assignee', 'name email avatar')
-      .populate('reporter', 'name email avatar');
+      .populate('assignees', 'name email avatar')
+      .populate('reporter', 'name email avatar')
+      .populate('projectId', 'name key');
+
+    const boardAssigneeIds = Array.isArray(populated.assignees) && populated.assignees.length > 0
+      ? populated.assignees.map((a) => (a?._id ? a._id : a))
+      : populated.assignee
+        ? [populated.assignee?._id ? populated.assignee._id : populated.assignee]
+        : [];
+    const reporterId = populated.reporter?._id ? populated.reporter._id : populated.reporter;
+
+    // Board updates
+    getIO().to(`project:${projectId}`).emit('issue:created', { issue: populated });
+
+    // User-centric updates
+    if (reporterId) {
+      getIO().to(`user:${reporterId}`).emit('issue:created', { issue: populated });
+    }
+    for (const aId of boardAssigneeIds) {
+      if (!aId) continue;
+      if (String(aId) !== String(reporterId)) {
+        getIO().to(`user:${aId}`).emit('issue:created', { issue: populated });
+      }
+    }
 
     res.status(201).json(populated);
   } catch (error) {
@@ -135,10 +163,16 @@ const updateIssue = async (req, res) => {
       'status',
       'priority',
       'assignee',
+      'assignees',
       'labels',
+      'checklist',
       'dueDate',
       'storyPoints',
     ];
+
+    const oldAssignees = Array.isArray(issue.assignees) && issue.assignees.length > 0
+      ? issue.assignees.map((a) => (a?._id ? a._id : a))
+      : (issue.assignee ? [String(issue.assignee)] : []);
 
     let assigneeChanged = false;
     let statusChanged = false;
@@ -151,12 +185,28 @@ const updateIssue = async (req, res) => {
            assigneeChanged = true;
            newAssignee = req.body[field];
         }
+        if (field === 'assignees' && Array.isArray(req.body[field])) {
+          const next = req.body[field].filter(Boolean).map(String);
+          const old = oldAssignees.map(String);
+          if (next.join(',') !== old.join(',')) {
+            assigneeChanged = true;
+            newAssignee = next[0] || null;
+          }
+        }
         if (field === 'status' && req.body[field] !== issue.status) {
            statusChanged = true;
         }
         issue[field] = req.body[field];
       }
     });
+
+    // Normalize: keep `assignee` and `assignees` consistent
+    if (Array.isArray(issue.assignees)) {
+      issue.assignees = issue.assignees.filter(Boolean);
+      issue.assignee = issue.assignees.length > 0 ? issue.assignees[0] : null;
+    } else {
+      issue.assignees = issue.assignee ? [issue.assignee] : [];
+    }
 
     const updatedIssue = await issue.save();
     
@@ -203,10 +253,27 @@ const updateIssue = async (req, res) => {
     // Return populated issue
     const populatedIssue = await Issue.findById(updatedIssue._id)
       .populate('assignee', 'name email avatar')
-      .populate('reporter', 'name email avatar');
+      .populate('assignees', 'name email avatar')
+      .populate('reporter', 'name email avatar')
+      .populate('projectId', 'name key');
 
     try {
-      getIO().to(`project:${updatedIssue.projectId}`).emit('issue:updated', { issue: populatedIssue });
+      const projectId = populatedIssue.projectId?._id ? populatedIssue.projectId._id : populatedIssue.projectId;
+      getIO().to(`project:${projectId}`).emit('issue:updated', { issue: populatedIssue });
+
+      const reporterId = populatedIssue.reporter?._id ? populatedIssue.reporter._id : populatedIssue.reporter;
+
+      if (reporterId) {
+        getIO().to(`user:${reporterId}`).emit('issue:updated', { issue: populatedIssue });
+      }
+      const assigneeIds = Array.isArray(populatedIssue.assignees) && populatedIssue.assignees.length > 0
+        ? populatedIssue.assignees.map((a) => (a?._id ? a._id : a))
+        : (populatedIssue.assignee ? [populatedIssue.assignee?._id ? populatedIssue.assignee._id : populatedIssue.assignee] : []);
+      for (const aId of assigneeIds) {
+        if (aId && String(aId) !== String(reporterId)) {
+          getIO().to(`user:${aId}`).emit('issue:updated', { issue: populatedIssue });
+        }
+      }
     } catch (e) {}
       
     res.json(populatedIssue);
@@ -232,12 +299,24 @@ const deleteIssue = async (req, res) => {
       return res.status(403).json({ message: 'Only the ticket creator can delete this ticket.' });
     }
 
-    const projectId = issue.projectId;
+    const projectId = issue.projectId?._id ? issue.projectId._id : issue.projectId;
     const issueId = issue._id;
+    const assigneeId = issue.assignee?._id ? issue.assignee._id : issue.assignee;
+    const assigneeIds = Array.isArray(issue.assignees) && issue.assignees.length > 0
+      ? issue.assignees.map((a) => (a?._id ? a._id : a))
+      : (assigneeId ? [assigneeId] : []);
+
     await issue.deleteOne();
 
     try {
-      getIO().to(`project:${projectId}`).emit('issue:deleted', { issueId: String(issueId) });
+      const payload = { issueId: String(issueId) };
+      getIO().to(`project:${projectId}`).emit('issue:deleted', payload);
+      if (reporterId) getIO().to(`user:${reporterId}`).emit('issue:deleted', payload);
+      for (const aId of assigneeIds) {
+        if (aId && String(aId) !== String(reporterId)) {
+          getIO().to(`user:${aId}`).emit('issue:deleted', payload);
+        }
+      }
     } catch (e) {}
     res.json({ message: 'Issue removed' });
   } catch (error) {
@@ -269,10 +348,23 @@ const updateIssuePriority = async (req, res) => {
 
     const populated = await Issue.findById(updated._id)
       .populate('assignee', 'name email avatar')
-      .populate('reporter', 'name email avatar');
+      .populate('assignees', 'name email avatar')
+      .populate('reporter', 'name email avatar')
+      .populate('projectId', 'name key');
 
     try {
-      getIO().to(`project:${updated.projectId}`).emit('issue:updated', { issue: populated });
+      const projectId = updated.projectId?._id ? updated.projectId._id : updated.projectId;
+      getIO().to(`project:${projectId}`).emit('issue:updated', { issue: populated });
+      const reporterId = populated.reporter?._id ? populated.reporter._id : populated.reporter;
+      if (reporterId) getIO().to(`user:${reporterId}`).emit('issue:updated', { issue: populated });
+      const assigneeIds = Array.isArray(populated.assignees) && populated.assignees.length > 0
+        ? populated.assignees.map((a) => (a?._id ? a._id : a))
+        : (populated.assignee ? [populated.assignee?._id ? populated.assignee._id : populated.assignee] : []);
+      for (const aId of assigneeIds) {
+        if (aId && String(aId) !== String(reporterId)) {
+          getIO().to(`user:${aId}`).emit('issue:updated', { issue: populated });
+        }
+      }
     } catch (e) {}
 
     res.json(populated);
@@ -302,10 +394,75 @@ const updateIssueDueDate = async (req, res) => {
 
     const populated = await Issue.findById(updated._id)
       .populate('assignee', 'name email avatar')
-      .populate('reporter', 'name email avatar');
+      .populate('assignees', 'name email avatar')
+      .populate('reporter', 'name email avatar')
+      .populate('projectId', 'name key');
 
     try {
-      getIO().to(`project:${updated.projectId}`).emit('issue:updated', { issue: populated });
+      const projectId = updated.projectId?._id ? updated.projectId._id : updated.projectId;
+      getIO().to(`project:${projectId}`).emit('issue:updated', { issue: populated });
+      const reporterId = populated.reporter?._id ? populated.reporter._id : populated.reporter;
+      if (reporterId) getIO().to(`user:${reporterId}`).emit('issue:updated', { issue: populated });
+      const assigneeIds = Array.isArray(populated.assignees) && populated.assignees.length > 0
+        ? populated.assignees.map((a) => (a?._id ? a._id : a))
+        : (populated.assignee ? [populated.assignee?._id ? populated.assignee._id : populated.assignee] : []);
+      for (const aId of assigneeIds) {
+        if (aId && String(aId) !== String(reporterId)) {
+          getIO().to(`user:${aId}`).emit('issue:updated', { issue: populated });
+        }
+      }
+    } catch (e) {}
+
+    res.json(populated);
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+// @desc    Update issue checklist
+// @route   PATCH /api/issues/:id/checklist
+// @access  Private
+const updateIssueChecklist = async (req, res) => {
+  try {
+    const { checklist } = req.body;
+    if (!Array.isArray(checklist)) {
+      return res.status(400).json({ message: 'checklist must be an array' });
+    }
+
+    const normalized = checklist.map((item) => ({
+      text: item?.text || '',
+      completed: Boolean(item?.completed),
+    }));
+
+    const issue = await Issue.findById(req.params.id);
+    if (!issue) {
+      return res.status(404).json({ message: 'Issue not found' });
+    }
+
+    issue.checklist = normalized;
+    await issue.save();
+
+    const populated = await Issue.findById(issue._id)
+      .populate('assignee', 'name email avatar')
+      .populate('assignees', 'name email avatar')
+      .populate('reporter', 'name email avatar')
+      .populate('projectId', 'name key');
+
+    try {
+      const projectId = issue.projectId?._id ? issue.projectId._id : issue.projectId;
+      getIO().to(`project:${projectId}`).emit('issue:updated', { issue: populated });
+
+      const reporterId = populated.reporter?._id ? populated.reporter._id : populated.reporter;
+
+      if (reporterId) getIO().to(`user:${reporterId}`).emit('issue:updated', { issue: populated });
+      const assigneeIds = Array.isArray(populated.assignees) && populated.assignees.length > 0
+        ? populated.assignees.map((a) => (a?._id ? a._id : a))
+        : (populated.assignee ? [populated.assignee?._id ? populated.assignee._id : populated.assignee] : []);
+      for (const aId of assigneeIds) {
+        if (aId && String(aId) !== String(reporterId)) {
+          getIO().to(`user:${aId}`).emit('issue:updated', { issue: populated });
+        }
+      }
     } catch (e) {}
 
     res.json(populated);
@@ -322,4 +479,5 @@ module.exports = {
   updateIssuePriority,
   updateIssueDueDate,
   deleteIssue,
+  updateIssueChecklist,
 };

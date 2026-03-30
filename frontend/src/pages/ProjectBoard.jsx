@@ -4,7 +4,7 @@ import Layout from '../components/Layout';
 import api from '../utils/api';
 import { AuthContext } from '../context/AuthContext';
 import { connectSocket, joinProjectRoom, leaveProjectRoom } from '../utils/socket';
-import { getAvatarUrl } from '../utils/avatar';
+import DicebearAvatar from '../components/DicebearAvatar';
 import { Plus, MoreHorizontal, Users, UserPlus, Shield, ChevronDown } from 'lucide-react';
 import TicketDetailsModal from '../components/TicketDetailsModal';
 
@@ -67,8 +67,16 @@ const ProjectBoard = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isAddMemberModalOpen, setIsAddMemberModalOpen] = useState(false);
   const [isLeadsModalOpen, setIsLeadsModalOpen] = useState(false);
+  const [isApplyTemplatesOpen, setIsApplyTemplatesOpen] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState('');
   const [selectedLeadIds, setSelectedLeadIds] = useState([]);
+  const [templatesGlobal, setTemplatesGlobal] = useState([]);
+  const [templatesProject, setTemplatesProject] = useState([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [templateTickets, setTemplateTickets] = useState([]);
+  const [selectedImportTicketIds, setSelectedImportTicketIds] = useState([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templateTicketsLoading, setTemplateTicketsLoading] = useState(false);
   const [selectedIssue, setSelectedIssue] = useState(null);
   const [newIssue, setNewIssue] = useState({
     title: '', description: '', issueType: 'Task', priority: 'Medium', assignee: '', status: 'Todo'
@@ -162,6 +170,78 @@ const ProjectBoard = () => {
       alert(err.response?.data?.message || 'Failed to update leads');
     }
   };
+
+  const fetchTemplatesForApply = async () => {
+    setTemplatesLoading(true);
+    try {
+      const [globalRes, projectRes] = await Promise.all([
+        api.get('/templates', { params: { scope: 'global' } }),
+        api.get('/templates', { params: { scope: 'project', projectId: id } }),
+      ]);
+      setTemplatesGlobal(Array.isArray(globalRes.data) ? globalRes.data : []);
+      setTemplatesProject(Array.isArray(projectRes.data) ? projectRes.data : []);
+      setSelectedTemplateId('');
+      setTemplateTickets([]);
+      setSelectedImportTicketIds([]);
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to load templates');
+    } finally {
+      setTemplatesLoading(false);
+    }
+  };
+
+  const handleApplyTemplates = async (e) => {
+    e.preventDefault();
+    if (!selectedTemplateId) {
+      alert('Select a template');
+      return;
+    }
+    if (!Array.isArray(selectedImportTicketIds) || selectedImportTicketIds.length === 0) {
+      alert('Select at least one ticket to import');
+      return;
+    }
+    try {
+      await api.post(`/projects/${id}/templates/apply`, {
+        templateId: selectedTemplateId,
+        selectedTicketIds: selectedImportTicketIds,
+      });
+      setIsApplyTemplatesOpen(false);
+      setSelectedTemplateId('');
+      setTemplateTickets([]);
+      setSelectedImportTicketIds([]);
+      // Ensure UI resets and columns reflect status immediately
+      fetchProjectData();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to apply templates');
+    }
+  };
+
+  useEffect(() => {
+    const loadTickets = async () => {
+      if (!selectedTemplateId) {
+        setTemplateTickets([]);
+        setSelectedImportTicketIds([]);
+        return;
+      }
+      setTemplateTicketsLoading(true);
+      try {
+        const { data } = await api.get(`/templates/${selectedTemplateId}/tickets`);
+        const tickets = Array.isArray(data)
+          ? data
+              .map((row) => row?.issue)
+              .filter(Boolean)
+          : [];
+        setTemplateTickets(tickets);
+        setSelectedImportTicketIds([]);
+      } catch (err) {
+        setTemplateTickets([]);
+        setSelectedImportTicketIds([]);
+      } finally {
+        setTemplateTicketsLoading(false);
+      }
+    };
+    if (isApplyTemplatesOpen) loadTickets();
+  }, [selectedTemplateId, isApplyTemplatesOpen]);
 
   const handleCreateIssue = async (e) => {
     e.preventDefault();
@@ -261,7 +341,12 @@ const ProjectBoard = () => {
   });
   const sortedAssignees = Object.entries(assigneeStats).sort((a,b) => b[1] - a[1]);
 
-  if (loading) return <Layout><div className="flex justify-center items-center h-full text-blue-500 font-semibold tracking-wider">Loading Board...</div></Layout>;
+  if (loading && !project) return <Layout title="Board"><div className="h-full" /></Layout>;
+  if (loading && project) return (
+    <Layout title={`${project.key} Board`}>
+      <div className="mb-6" />
+    </Layout>
+  );
   if (error) return <Layout><div className="p-4 bg-red-50 text-red-600 rounded-lg">{error}</div></Layout>;
 
   return (
@@ -286,6 +371,19 @@ const ProjectBoard = () => {
             Manage leads
           </button>
         )}
+
+        {isLead() && (
+          <button
+            type="button"
+            onClick={() => {
+              setIsApplyTemplatesOpen(true);
+              fetchTemplatesForApply();
+            }}
+            className="ml-1 inline-flex items-center text-xs font-semibold text-blue-600 hover:text-blue-800 transition"
+          >
+            Apply templates
+          </button>
+        )}
       </div>
 
       {activeUserIds.length > 0 && (
@@ -297,11 +395,10 @@ const ProjectBoard = () => {
                 key={uid}
                 className="group relative w-7 h-7 rounded-full border-2 border-white overflow-hidden bg-gray-100"
               >
-                <img
-                  src={getAvatarUrl(uid)}
+                <DicebearAvatar
+                  seed={uid}
                   alt="Active user"
                   className="w-7 h-7"
-                  referrerPolicy="no-referrer"
                   title={(users.find(u => u._id === uid)?.name) || (project?.members?.find(m => m._id === uid)?.name) || (project?.leads?.find(l => l._id === uid)?.name) || (project?.createdBy?._id === uid ? project?.createdBy?.name : uid)}
                 />
                 <div className="pointer-events-none absolute -top-9 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -732,6 +829,171 @@ const ProjectBoard = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Apply Templates Modal */}
+      {isApplyTemplatesOpen && (
+        <div className="fixed inset-0 bg-gray-900 bg-opacity-50 overflow-y-auto h-full w-full z-50 flex justify-center items-center backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-2xl p-8 w-full max-w-2xl mx-4">
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h3 className="text-2xl font-bold text-gray-800">Apply Template</h3>
+                <p className="text-sm text-gray-500 mt-1">Select a template, then choose which tickets to import.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsApplyTemplatesOpen(false)}
+                className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-200 transition"
+                title="Close"
+              >
+                &times;
+              </button>
+            </div>
+
+            {templatesLoading ? (
+              <div className="text-sm text-gray-500 py-10 text-center">Loading templates...</div>
+            ) : (
+              <form onSubmit={handleApplyTemplates}>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Global Templates</div>
+                    {templatesGlobal.length === 0 ? (
+                      <div className="text-sm text-gray-400">No global templates.</div>
+                    ) : (
+                      <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                        {templatesGlobal.map((t) => {
+                          const checked = selectedTemplateId && String(t._id) === String(selectedTemplateId);
+                          return (
+                            <label
+                              key={t._id}
+                              className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition ${
+                                checked ? 'border-blue-300 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                checked={checked}
+                                onChange={() => setSelectedTemplateId(String(t._id))}
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="font-semibold text-gray-800 truncate">{t.name}</div>
+                                <div className="text-xs text-gray-500 mt-1">
+                                  {(Array.isArray(t.tickets) ? t.tickets.length : 0)} tickets
+                                </div>
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Project Templates</div>
+                    {templatesProject.length === 0 ? (
+                      <div className="text-sm text-gray-400">No project templates.</div>
+                    ) : (
+                      <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                        {templatesProject.map((t) => {
+                          const checked = selectedTemplateId && String(t._id) === String(selectedTemplateId);
+                          return (
+                            <label
+                              key={t._id}
+                              className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition ${
+                                checked ? 'border-blue-300 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                checked={checked}
+                                onChange={() => setSelectedTemplateId(String(t._id))}
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="font-semibold text-gray-800 truncate">{t.name}</div>
+                                <div className="text-xs text-gray-500 mt-1">
+                                  {(Array.isArray(t.tickets) ? t.tickets.length : 0)} tickets
+                                </div>
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {selectedTemplateId ? (
+                  <div className="mt-6">
+                    <div className="text-sm font-semibold text-gray-800 mb-3">Tickets in this template</div>
+                    {templateTicketsLoading ? (
+                      <div className="text-sm text-gray-500">Loading tickets...</div>
+                    ) : templateTickets.length === 0 ? (
+                      <div className="text-sm text-gray-400">No tickets in this template.</div>
+                    ) : (
+                      <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1 scrollbar-hide">
+                        {templateTickets.map((issue) => {
+                          const checked = selectedImportTicketIds.map(String).includes(String(issue._id));
+                          const priorityPill = getPriorityPill(issue.priority);
+                          return (
+                            <label
+                              key={issue._id}
+                              className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition ${
+                                checked ? 'border-blue-300 bg-blue-50' : 'border-gray-200 hover:bg-white'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => {
+                                  const id = String(issue._id);
+                                  setSelectedImportTicketIds((prev) => {
+                                    const set = new Set(prev.map(String));
+                                    if (set.has(id)) set.delete(id);
+                                    else set.add(id);
+                                    return Array.from(set);
+                                  });
+                                }}
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center justify-between gap-3">
+                                  <div className="font-semibold text-gray-900 truncate">{issue.title}</div>
+                                  <div>{priorityPill}</div>
+                                </div>
+                                <div className="text-xs text-gray-500 mt-1 truncate">
+                                  {issue.issueType || 'Task'}
+                                  {Array.isArray(issue.labels) && issue.labels.length > 0
+                                    ? ` • ${issue.labels.slice(0, 3).join(', ')}`
+                                    : ''}
+                                </div>
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+
+                <div className="flex justify-end space-x-3 mt-6">
+                  <button
+                    type="button"
+                    onClick={() => setIsApplyTemplatesOpen(false)}
+                    className="px-5 py-2.5 rounded-lg font-semibold text-gray-600 bg-gray-100 hover:bg-gray-200"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2.5 rounded-lg font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={!selectedTemplateId || selectedImportTicketIds.length === 0}
+                  >
+                    Apply
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}
