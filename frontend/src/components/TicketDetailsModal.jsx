@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useContext, useRef } from 'react';
 import api from '../utils/api';
 import { AuthContext } from '../context/AuthContext';
-import { X, MessageSquare, Send, Calendar, MoreHorizontal } from 'lucide-react';
+import { X, MessageSquare, Send, Calendar, MoreHorizontal, Trash2 } from 'lucide-react';
 
 const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
   const { user } = useContext(AuthContext);
@@ -21,6 +21,7 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [assigneeSelectId, setAssigneeSelectId] = useState('');
   const actionsMenuRef = useRef(null);
+  const [newChecklistText, setNewChecklistText] = useState('');
 
   const getUrgencyStyles = () => {
     const dueOverdue = issue?.dueDate && new Date(issue.dueDate).getTime() < Date.now() && issue.status !== 'Done';
@@ -103,6 +104,8 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
   })();
 
   const currentAssigneeIds = currentAssigneeObjs.map((u) => String(u._id));
+  const isIssueAssignee = currentAssigneeIds.includes(String(user?._id));
+  const canManageSubtasks = isIssueCreator || isIssueAssignee;
 
   const handleAssigneesUpdate = async (nextIds) => {
     const normalized = Array.isArray(nextIds) ? nextIds.filter(Boolean).map(String) : [];
@@ -245,6 +248,40 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
     }
   };
 
+  const handleAddChecklistItem = async () => {
+    const text = newChecklistText.trim();
+    if (!text) return;
+    const current = Array.isArray(issue?.checklist) ? issue.checklist : [];
+    const next = [...current, { text, completed: false }];
+    try {
+      setLoading(true);
+      const { data } = await api.patch(`/issues/${issue._id}/checklist`, { checklist: next });
+      onUpdate(data);
+      setEditedIssue((prev) => ({ ...prev, checklist: data.checklist }));
+      setNewChecklistText('');
+    } catch (err) {
+      alert('Failed to add checklist item');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteChecklistItem = async (index) => {
+    const current = Array.isArray(issue?.checklist) ? issue.checklist : [];
+    if (!current[index]) return;
+    const next = current.filter((_, i) => i !== index);
+    try {
+      setLoading(true);
+      const { data } = await api.patch(`/issues/${issue._id}/checklist`, { checklist: next });
+      onUpdate(data);
+      setEditedIssue((prev) => ({ ...prev, checklist: data.checklist }));
+    } catch (err) {
+      alert('Failed to delete subtask');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleAddComment = async (e) => {
     e.preventDefault();
     if (!newComment.trim()) return;
@@ -330,6 +367,73 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
                      <button onClick={() => setEditMode(true)} className="text-sm text-blue-600 font-semibold hover:underline">Edit Description</button>
                   </div>
                 )}
+
+                <div className="mt-6 border border-gray-200 rounded-xl bg-white p-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-semibold text-gray-700">Subtasks</h3>
+                    {!canManageSubtasks && (
+                      <span className="text-[11px] text-gray-400">Only creator/assignees can edit</span>
+                    )}
+                  </div>
+
+                  <div className="mt-3 space-y-2">
+                    {Array.isArray(issue?.checklist) && issue.checklist.length > 0 ? (
+                      issue.checklist.map((item, idx) => (
+                        <div
+                          key={`${idx}-${item?.text || 'item'}`}
+                          className="flex items-center gap-3 p-2.5 rounded-lg border border-gray-100 bg-gray-50"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={Boolean(item?.completed)}
+                            onChange={() => canManageSubtasks && handleChecklistToggle(idx)}
+                            disabled={loading || !canManageSubtasks}
+                            className="w-4 h-4 accent-blue-600"
+                          />
+                          <span
+                            className={`flex-1 text-sm text-gray-700 ${
+                              item?.completed ? 'line-through text-gray-400' : ''
+                            }`}
+                          >
+                            {item?.text}
+                          </span>
+                          {canManageSubtasks && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteChecklistItem(idx)}
+                              disabled={loading}
+                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition disabled:opacity-50"
+                              title="Delete subtask"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-sm text-gray-400">No subtasks yet.</div>
+                    )}
+                  </div>
+
+                  <div className="mt-3 flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={newChecklistText}
+                      onChange={(e) => setNewChecklistText(e.target.value)}
+                      placeholder="Add subtask..."
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      disabled={loading || !canManageSubtasks}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddChecklistItem}
+                      disabled={loading || !canManageSubtasks || !newChecklistText.trim()}
+                      className="px-3 py-2 rounded-lg font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition text-sm"
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
               </div>
             ) : (
               <div className="flex flex-col h-full">
@@ -485,32 +589,6 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
                      <span className="px-2 py-0.5 bg-gray-100 rounded border">{issue.issueType}</span>
                    </div>
                 )}
-              </div>
-
-              <div className="pt-4 border-t border-gray-200 mt-4">
-                <label className="text-xs font-semibold text-gray-500 uppercase">Checklist</label>
-                <div className="mt-2 space-y-2">
-                  {Array.isArray(issue?.checklist) && issue.checklist.length > 0 ? (
-                    issue.checklist.map((item, idx) => (
-                      <label key={`${idx}-${item?.text || 'item'}`} className="flex items-start gap-3 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(item?.completed)}
-                          onChange={() => handleChecklistToggle(idx)}
-                          disabled={loading}
-                          className="mt-1 w-4 h-4 accent-blue-600"
-                        />
-                        <span
-                          className={`text-sm text-gray-700 leading-tight ${item?.completed ? 'line-through text-gray-400' : ''}`}
-                        >
-                          {item?.text}
-                        </span>
-                      </label>
-                    ))
-                  ) : (
-                    <div className="text-sm text-gray-400">No checklist</div>
-                  )}
-                </div>
               </div>
 
               <div className="pt-4 border-t border-gray-200 mt-4">

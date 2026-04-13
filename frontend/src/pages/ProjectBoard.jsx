@@ -49,6 +49,37 @@ const getCardAccent = (issue) => {
   }
 };
 
+const getIssueAssigneeList = (issue) => {
+  const list = Array.isArray(issue?.assignees) && issue.assignees.length > 0
+    ? issue.assignees
+    : issue?.assignee
+      ? [issue.assignee]
+      : [];
+  return list.filter(Boolean);
+};
+
+const ChecklistProgressBar = ({ issue }) => {
+  const checklist = Array.isArray(issue?.checklist) ? issue.checklist : [];
+  const total = checklist.length;
+  if (!total) return null;
+  const completed = checklist.filter((i) => Boolean(i?.completed)).length;
+  const pct = Math.round((completed / total) * 100);
+  return (
+    <div className="mb-2">
+      <div className="flex items-center justify-between text-[10px] font-semibold text-gray-500 mb-1">
+        <span>Subtasks</span>
+        <span className="text-green-700">{completed}/{total} ({pct}%)</span>
+      </div>
+      <div className="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
+        <div
+          className="h-full bg-green-500 rounded-full transition-all"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+};
+
 const ProjectBoard = () => {
   const { id } = useParams();
   const { user } = useContext(AuthContext);
@@ -79,7 +110,7 @@ const ProjectBoard = () => {
   const [templateTicketsLoading, setTemplateTicketsLoading] = useState(false);
   const [selectedIssue, setSelectedIssue] = useState(null);
   const [newIssue, setNewIssue] = useState({
-    title: '', description: '', issueType: 'Task', priority: 'Medium', assignee: '', status: 'Todo'
+    title: '', description: '', issueType: 'Task', priority: 'Medium', assignee: '', assignees: [], status: 'Todo'
   });
   const [draggingIssueId, setDraggingIssueId] = useState(null);
 
@@ -246,9 +277,17 @@ const ProjectBoard = () => {
   const handleCreateIssue = async (e) => {
     e.preventDefault();
     try {
-      await api.post('/issues', { ...newIssue, projectId: id });
+      const nextAssignees = Array.isArray(newIssue.assignees) && newIssue.assignees.length > 0
+        ? newIssue.assignees
+        : (newIssue.assignee ? [newIssue.assignee] : []);
+      await api.post('/issues', {
+        ...newIssue,
+        assignees: nextAssignees,
+        assignee: nextAssignees[0] || null,
+        projectId: id,
+      });
       setIsCreateModalOpen(false);
-      setNewIssue({ title: '', description: '', issueType: 'Task', priority: 'Medium', assignee: '', status: 'Todo' });
+      setNewIssue({ title: '', description: '', issueType: 'Task', priority: 'Medium', assignee: '', assignees: [], status: 'Todo' });
       fetchProjectData();
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to create issue');
@@ -307,7 +346,7 @@ const ProjectBoard = () => {
     const query = filterText.toLowerCase().trim();
     if (!query) return true;
     const titleMatch = issue.title.toLowerCase().includes(query);
-    const assigneeMatch = issue.assignee && issue.assignee.name.toLowerCase().includes(query);
+    const assigneeMatch = getIssueAssigneeList(issue).some((a) => (a?.name || '').toLowerCase().includes(query));
     const ticketKey = `${project.key}-${issue._id.slice(-4).toUpperCase()}`;
     const ticketMatch = ticketKey.toLowerCase().includes(query);
     return titleMatch || assigneeMatch || ticketMatch;
@@ -335,8 +374,15 @@ const ProjectBoard = () => {
   const assigneeStats = {};
   issues.forEach(i => {
     if (i.status !== 'Done') {
-       const uName = i.assignee ? i.assignee.name : 'Unassigned';
-       assigneeStats[uName] = (assigneeStats[uName] || 0) + 1;
+       const assignees = getIssueAssigneeList(i);
+       if (assignees.length === 0) {
+         assigneeStats.Unassigned = (assigneeStats.Unassigned || 0) + 1;
+       } else {
+         assignees.forEach((a) => {
+           const n = a?.name || 'Unknown';
+           assigneeStats[n] = (assigneeStats[n] || 0) + 1;
+         });
+       }
     }
   });
   const sortedAssignees = Object.entries(assigneeStats).sort((a,b) => b[1] - a[1]);
@@ -528,16 +574,28 @@ const ProjectBoard = () => {
           if (swimlane === 'none') {
             lanes.push({ key: 'all', title: null, filterFn: () => true });
           } else if (swimlane === 'assignee') {
-            const assignees = Array.from(
-              new Map(
-                filteredIssues.map((i) => [i.assignee?._id || 'unassigned', i.assignee || null])
-              ).entries()
-            );
+            const byAssignee = new Map();
+            filteredIssues.forEach((i) => {
+              const assignees = getIssueAssigneeList(i);
+              if (assignees.length === 0) {
+                byAssignee.set('unassigned', null);
+                return;
+              }
+              assignees.forEach((a) => {
+                const k = String(a?._id || a);
+                if (!byAssignee.has(k)) byAssignee.set(k, a);
+              });
+            });
+            const assignees = Array.from(byAssignee.entries());
             assignees.forEach(([k, a]) => {
               lanes.push({
                 key: `assignee:${k}`,
                 title: a ? `Assignee: ${a.name}` : 'Assignee: Unassigned',
-                filterFn: (i) => (a ? i.assignee?._id === a._id : !i.assignee),
+                filterFn: (i) => {
+                  const issueAssignees = getIssueAssigneeList(i);
+                  if (!a) return issueAssignees.length === 0;
+                  return issueAssignees.some((x) => String(x?._id || x) === String(a?._id || a));
+                },
               });
             });
           } else {
@@ -604,21 +662,39 @@ const ProjectBoard = () => {
                                   Due: {new Date(issue.dueDate).toLocaleDateString()}
                                 </div>
                               )}
+
+                              <ChecklistProgressBar issue={issue} />
                               
                               <div className="mt-auto flex items-center justify-between">
                                 <div className="flex items-center space-x-2">
                                   {getPriorityPill(issue.priority)}
                                   <div className="flex -space-x-1.5 object-cover">
-                                     {issue.assignee ? (
-                                        <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-white text-[10px] font-bold border-2 border-white ring-1 ring-gray-100" title={issue.assignee.name}>
-                                          {issue.assignee.name.charAt(0)}
-                                        </div>
+                                     {getIssueAssigneeList(issue).length > 0 ? (
+                                       <>
+                                         {getIssueAssigneeList(issue).slice(0, 3).map((a, idx) => (
+                                           <div
+                                             key={`${issue._id}-assignee-${idx}-${String(a?._id || a)}`}
+                                             className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-white text-[10px] font-bold border-2 border-white ring-1 ring-gray-100"
+                                             title={a?.name || 'Assignee'}
+                                           >
+                                             {(a?.name || '?').charAt(0)}
+                                           </div>
+                                         ))}
+                                         {getIssueAssigneeList(issue).length > 3 && (
+                                           <div
+                                             className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-gray-700 text-[10px] font-bold border-2 border-white ring-1 ring-gray-100"
+                                             title={`${getIssueAssigneeList(issue).length - 3} more assignees`}
+                                           >
+                                             +{getIssueAssigneeList(issue).length - 3}
+                                           </div>
+                                         )}
+                                       </>
                                      ) : (
-                                        <div className="w-6 h-6 rounded-full bg-gray-200 border-2 border-white flex items-center justify-center text-gray-400 text-[10px]" title="Unassigned">?</div>
+                                       <div className="w-6 h-6 rounded-full bg-gray-200 border-2 border-white flex items-center justify-center text-gray-400 text-[10px]" title="Unassigned">?</div>
                                      )}
                                   </div>
                                 </div>
-                                
+
                                 <select 
                                   className="text-xs bg-gray-50 border border-gray-200 rounded p-1 text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500 opacity-0 group-hover:opacity-100 absolute right-3 bottom-3 transition-opacity"
                                   value={issue.status}
@@ -709,17 +785,21 @@ const ProjectBoard = () => {
                 </select>
               </div>
               <div className="mb-6">
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Assignee</label>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Assignees</label>
                 <select 
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  value={newIssue.assignee}
-                  onChange={(e) => setNewIssue({...newIssue, assignee: e.target.value})}
+                  value={newIssue.assignees}
+                  onChange={(e) => {
+                    const selected = Array.from(e.target.selectedOptions).map((o) => o.value);
+                    setNewIssue({ ...newIssue, assignees: selected, assignee: selected[0] || '' });
+                  }}
+                  multiple
                 >
-                  <option value="">Unassigned</option>
                   {availableMembers.map(m => (
                     <option key={m._id} value={m._id}>{m.name}</option>
                   ))}
                 </select>
+                <p className="mt-1 text-[11px] text-gray-400">Hold Ctrl/Cmd to select multiple users.</p>
               </div>
               <div className="flex justify-end space-x-3">
                 <button type="button" onClick={() => setIsCreateModalOpen(false)} className="px-5 py-2.5 rounded-lg font-semibold text-gray-600 bg-gray-100 hover:bg-gray-200">Cancel</button>

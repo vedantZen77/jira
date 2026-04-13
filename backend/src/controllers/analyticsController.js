@@ -120,14 +120,31 @@ const workloadPerUser = async (req, res) => {
   try {
     const match = {
       ...(req.query.projectId ? { projectId: req.query.projectId } : {}),
+      isDeleted: { $ne: true },
     };
     if (req.query.state === 'open') match.status = { $ne: 'Done' };
     if (req.query.state === 'closed') match.status = 'Done';
     const data = await Issue.aggregate([
       { $match: match },
       {
+        $project: {
+          status: 1,
+          // Multi-assignee aware:
+          // - if `assignees` exists and has values, count for each assignee
+          // - else fall back to legacy `assignee`
+          assigneeIds: {
+            $cond: [
+              { $gt: [{ $size: { $ifNull: ['$assignees', []] } }, 0] },
+              '$assignees',
+              ['$assignee'],
+            ],
+          },
+        },
+      },
+      { $unwind: { path: '$assigneeIds', preserveNullAndEmptyArrays: true } },
+      {
         $group: {
-          _id: '$assignee',
+          _id: '$assigneeIds',
           openCount: { $sum: { $cond: [{ $ne: ['$status', 'Done'] }, 1, 0] } },
           doneCount: { $sum: { $cond: [{ $eq: ['$status', 'Done'] }, 1, 0] } },
           totalCount: { $sum: 1 },

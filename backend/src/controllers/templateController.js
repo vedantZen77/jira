@@ -248,7 +248,13 @@ const applyTemplateToProject = async (req, res) => {
           assignees: [],
           reporter: req.user._id,
           labels: Array.isArray(src.labels) ? src.labels : [],
-          checklist: Array.isArray(src.checklist) ? src.checklist : [],
+          // Copy checklist items, but always reset completion state on import.
+          checklist: Array.isArray(src.checklist)
+            ? src.checklist.map((item) => ({
+                text: item?.text || '',
+                completed: false,
+              }))
+            : [],
           dueDate: null,
           storyPoints: src.storyPoints,
           // Recurring is handled by RecurringSchedule, not by templates,
