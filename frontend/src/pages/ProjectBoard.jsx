@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useContext } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import Layout from '../components/Layout';
 import api from '../utils/api';
 import { AuthContext } from '../context/AuthContext';
 import { connectSocket, joinProjectRoom, leaveProjectRoom } from '../utils/socket';
 import DicebearAvatar from '../components/DicebearAvatar';
-import { Plus, MoreHorizontal, Users, UserPlus, Shield, ChevronDown } from 'lucide-react';
+import { Plus, MoreHorizontal, Users, UserPlus, Shield, ChevronDown, Download } from 'lucide-react';
 import TicketDetailsModal from '../components/TicketDetailsModal';
 
 const statuses = ['Backlog', 'Todo', 'In Progress', 'In Review', 'Testing', 'Done'];
@@ -82,6 +82,7 @@ const ChecklistProgressBar = ({ issue }) => {
 
 const ProjectBoard = () => {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { user } = useContext(AuthContext);
   
   const [project, setProject] = useState(null);
@@ -109,6 +110,7 @@ const ProjectBoard = () => {
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [templateTicketsLoading, setTemplateTicketsLoading] = useState(false);
   const [selectedIssue, setSelectedIssue] = useState(null);
+  const [exporting, setExporting] = useState(false);
   const [newIssue, setNewIssue] = useState({
     title: '', description: '', issueType: 'Task', priority: 'Medium', assignee: '', assignees: [], status: 'Todo'
   });
@@ -342,6 +344,39 @@ const ProjectBoard = () => {
     }
   };
 
+  const handleExportProject = async () => {
+    const confirmed = window.confirm(
+      'Exporting will archive this project and delete it from the database. Continue?'
+    );
+    if (!confirmed) return;
+
+    try {
+      setExporting(true);
+      const { data } = await api.get(`/projects/${id}/export`);
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      const dateTag = new Date().toISOString().slice(0, 10);
+      const safeProjectName = String(project.name || 'project')
+        .trim()
+        .replace(/[<>:"/\\|?*\x00-\x1F]/g, '')
+        .replace(/\s+/g, '-')
+        .slice(0, 80) || 'project';
+      anchor.href = url;
+      anchor.download = `${safeProjectName}-${dateTag}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+      alert('Project exported and removed from database successfully.');
+      navigate('/dashboard');
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to export project');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const filteredIssues = issues.filter(issue => {
     const query = filterText.toLowerCase().trim();
     if (!query) return true;
@@ -561,6 +596,20 @@ const ProjectBoard = () => {
           </div>
         </div>
         <div className="flex space-x-3">
+          {isLead() && (
+            <>
+              <button
+                type="button"
+                onClick={handleExportProject}
+                disabled={exporting}
+                className="flex items-center bg-white text-gray-700 border border-gray-300 px-4 py-2.5 rounded-lg shadow-sm hover:bg-gray-50 transition text-sm font-medium disabled:opacity-60 disabled:cursor-not-allowed"
+                title="Export full project backup"
+              >
+                <Download size={16} className="mr-2" />
+                {exporting ? 'Exporting...' : 'Export Project'}
+              </button>
+            </>
+          )}
           <button onClick={() => setIsCreateModalOpen(true)} className="flex items-center bg-blue-600 text-white px-4 py-2.5 rounded-lg shadow-sm hover:bg-blue-700 transition text-sm font-medium">
             <Plus size={18} className="mr-2" /> Create Issue
           </button>

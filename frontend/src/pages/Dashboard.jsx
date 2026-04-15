@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useRef } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import Layout from '../components/Layout';
 import api from '../utils/api';
-import { Plus, Briefcase, ChevronRight, Search, Key, Trash2 } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Plus, Briefcase, ChevronRight, Search, Key, Trash2, Upload } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 const Dashboard = () => {
   const { user } = useContext(AuthContext);
@@ -16,6 +16,8 @@ const Dashboard = () => {
   const [filterText, setFilterText] = useState('');
   const [newProject, setNewProject] = useState({ name: '', key: '', description: '' });
   const [deletingId, setDeletingId] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const importInputRef = useRef(null);
 
   const isLead = (project) => {
     if (!project || !user?._id) return false;
@@ -76,6 +78,31 @@ const Dashboard = () => {
     }
   };
 
+  const triggerImportPicker = () => {
+    importInputRef.current?.click();
+  };
+
+  const handleImportProject = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    try {
+      setImporting(true);
+      const raw = await file.text();
+      const parsed = JSON.parse(raw);
+      const { data } = await api.post('/projects/import', parsed);
+      await fetchProjects();
+      alert(
+        `Project imported successfully. ${data?.importedIssues || 0} tickets and ${data?.importedComments || 0} comments restored.`
+      );
+    } catch (err) {
+      alert(err.response?.data?.message || err.message || 'Failed to import project backup');
+    } finally {
+      setImporting(false);
+    }
+  };
+
   if (loading) return <Layout title="Dashboard"><div className="flex justify-center items-center h-full text-blue-500 font-semibold tracking-wider">Loading...</div></Layout>;
 
   return (
@@ -104,6 +131,23 @@ const Dashboard = () => {
             <Plus size={18} className="mr-2" />
             Create Project
           </button>
+          <button
+            type="button"
+            onClick={triggerImportPicker}
+            disabled={importing}
+            className="flex items-center px-4 py-2 bg-white text-gray-700 border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 transition font-medium whitespace-nowrap disabled:opacity-60 disabled:cursor-not-allowed"
+            title="Import project backup JSON"
+          >
+            <Upload size={16} className="mr-2" />
+            {importing ? 'Importing...' : 'Import Project'}
+          </button>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept="application/json,.json"
+            onChange={handleImportProject}
+            className="hidden"
+          />
         </div>
       </div>
 
