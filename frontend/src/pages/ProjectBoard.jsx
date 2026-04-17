@@ -262,7 +262,13 @@ const ProjectBoard = () => {
         const { data } = await api.get(`/templates/${selectedTemplateId}/tickets`);
         const tickets = Array.isArray(data)
           ? data
-              .map((row) => row?.issue)
+              .map((row) => {
+                const issue = row?.issue;
+                if (!issue) return null;
+                const selectableId = String(row?.templateTicketId || row?.ticketId || issue?._id || '');
+                if (!selectableId) return null;
+                return { ...issue, _id: selectableId };
+              })
               .filter(Boolean)
           : [];
         setTemplateTickets(tickets);

@@ -86,6 +86,7 @@ const TaskTemplates = () => {
   const [sourceProjectId, setSourceProjectId] = useState('');
   const [ticketQuery, setTicketQuery] = useState('');
   const [sourceIssues, setSourceIssues] = useState([]);
+  const [editingTicketRows, setEditingTicketRows] = useState([]);
   const [selectedTicketIds, setSelectedTicketIds] = useState([]);
 
   // Edit mode
@@ -189,6 +190,55 @@ const TaskTemplates = () => {
     return sourceIssues.filter((i) => (i.title || '').toLowerCase().includes(q));
   }, [ticketQuery, sourceIssues]);
 
+  const filteredEditingRows = useMemo(() => {
+    const q = ticketQuery.trim().toLowerCase();
+    if (!editingTemplateId) return [];
+    const rows = Array.isArray(editingTicketRows) ? editingTicketRows : [];
+    if (!q) return rows;
+    return rows.filter((row) => (row?.issue?.title || '').toLowerCase().includes(q));
+  }, [ticketQuery, editingTemplateId, editingTicketRows]);
+
+  const editingSelectableRows = useMemo(() => {
+    if (!editingTemplateId) return [];
+
+    const existingRows = (Array.isArray(editingTicketRows) ? editingTicketRows : [])
+      .map((row, idx) => {
+        const templateTicketId = row?.templateTicketId || row?.ticketId || row?.issue?._id || `row-${idx}`;
+        const payloadTicketId = row?.ticketId || row?.templateTicketId || row?.issue?._id;
+        if (!payloadTicketId) return null;
+        return {
+          selectableId: `tmpl:${String(templateTicketId)}`,
+          payloadTicketId: String(payloadTicketId),
+          issue: row?.issue,
+        };
+      })
+      .filter(Boolean);
+
+    const existingSourceIds = new Set(
+      existingRows
+        .map((r) => r?.issue?.sourceIssueId || r?.issue?._id)
+        .filter(Boolean)
+        .map(String)
+    );
+
+    const addableRows = (Array.isArray(sourceIssues) ? sourceIssues : [])
+      .filter((issue) => issue?._id && !existingSourceIds.has(String(issue._id)))
+      .map((issue) => ({
+        selectableId: `live:${String(issue._id)}`,
+        payloadTicketId: String(issue._id),
+        issue,
+      }));
+
+    return [...existingRows, ...addableRows];
+  }, [editingTemplateId, editingTicketRows, sourceIssues]);
+
+  const filteredEditingSelectableRows = useMemo(() => {
+    const q = ticketQuery.trim().toLowerCase();
+    if (!editingTemplateId) return [];
+    if (!q) return editingSelectableRows;
+    return editingSelectableRows.filter((row) => (row?.issue?.title || '').toLowerCase().includes(q));
+  }, [ticketQuery, editingTemplateId, editingSelectableRows]);
+
   const selectedSet = useMemo(() => new Set(selectedTicketIds.map(String)), [selectedTicketIds]);
 
   const addTicketsFilteredIssues = useMemo(() => {
@@ -222,7 +272,15 @@ const TaskTemplates = () => {
       description,
       scope,
       ...(scope === 'project' ? { projectId: effectiveProjectId } : {}),
-      tickets: selectedTicketIds.map((tid, idx) => ({ ticketId: tid, order: idx })),
+      tickets: selectedTicketIds.map((tid, idx) => {
+        if (!editingTemplateId) {
+          return { ticketId: tid, order: idx };
+        }
+        const row = editingSelectableRows.find((r) => String(r.selectableId) === String(tid));
+        // Use live ticketId when available, fallback to template ticket id to preserve snapshot rows.
+        const persistedId = row?.payloadTicketId || tid;
+        return { ticketId: persistedId, order: idx };
+      }),
     };
 
     setSaving(true);
@@ -237,6 +295,7 @@ const TaskTemplates = () => {
       setEditingTemplateId('');
       setName('');
       setDescription('');
+      setEditingTicketRows([]);
       setSelectedTicketIds([]);
       setTicketQuery('');
       fetchTemplates();
@@ -275,15 +334,16 @@ const TaskTemplates = () => {
       if (template.scope === 'project') {
         setSourceProjectId(templateProjectId);
       } else {
-        const { data: rows } = await api.get(`/templates/${template._id}/tickets`);
-        const firstProjectId = rows?.[0]?.issue?.projectId?._id || rows?.[0]?.issue?.projectId || '';
-        if (firstProjectId) setSourceProjectId(String(firstProjectId));
+        setSourceProjectId('');
       }
 
-      const orderedTicketIds = (template.tickets || [])
-        .slice()
-        .sort((a, b) => (a.order || 0) - (b.order || 0))
-        .map((t) => t.ticketId)
+      const { data: rows } = await api.get(`/templates/${template._id}/tickets`);
+      const normalizedRows = Array.isArray(rows) ? rows : [];
+      setEditingTicketRows(normalizedRows);
+      const firstProjectId = normalizedRows?.[0]?.issue?.projectId?._id || normalizedRows?.[0]?.issue?.projectId || '';
+      if (firstProjectId) setSourceProjectId(String(firstProjectId));
+      const orderedTicketIds = normalizedRows
+        .map((row) => `tmpl:${String(row?.templateTicketId || row?.ticketId || row?.issue?._id || '')}`)
         .filter(Boolean)
         .map(String);
       setSelectedTicketIds(orderedTicketIds);
@@ -441,16 +501,26 @@ const TaskTemplates = () => {
             </div>
 
             <div className="space-y-3 max-h-[360px] overflow-y-auto pr-1 pb-2 scrollbar-hide">
-              {filteredIssues.length === 0 ? (
-                <div className="text-sm text-gray-400 text-center py-10">No tickets found.</div>
+              {(editingTemplateId ? filteredEditingSelectableRows : filteredIssues).length === 0 ? (
+                <div className="text-sm text-gray-400 text-center py-10">
+                  {editingTemplateId
+                    ? 'No template tickets found for update.'
+                    : 'No tickets found.'}
+                </div>
               ) : (
-                filteredIssues.map((issue) => (
+                (editingTemplateId ? filteredEditingSelectableRows : filteredIssues).map((rowOrIssue) => {
+                  const issue = editingTemplateId ? rowOrIssue?.issue : rowOrIssue;
+                  const selectableId = editingTemplateId
+                    ? String(rowOrIssue?.selectableId)
+                    : String(rowOrIssue?._id);
+                  const previewIssue = editingTemplateId ? { ...issue, _id: selectableId } : issue;
+                  return (
                   <TemplateCardPreview
-                    key={issue._id}
-                    issue={issue}
-                    selected={selectedSet.has(String(issue._id))}
+                    key={selectableId}
+                    issue={previewIssue}
+                    selected={selectedSet.has(selectableId)}
                     onToggle={() => {
-                      const id = String(issue._id);
+                      const id = selectableId;
                       setSelectedTicketIds((prev) => {
                         const set = new Set(prev.map(String));
                         if (set.has(id)) set.delete(id);
@@ -459,7 +529,8 @@ const TaskTemplates = () => {
                       });
                     }}
                   />
-                ))
+                );
+                })
               )}
             </div>
 
@@ -470,6 +541,7 @@ const TaskTemplates = () => {
                   setEditingTemplateId('');
                   setName('');
                   setDescription('');
+                  setEditingTicketRows([]);
                   setSelectedTicketIds([]);
                   setTicketQuery('');
                 }}
