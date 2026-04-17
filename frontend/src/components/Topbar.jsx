@@ -1,5 +1,5 @@
 import React, { useContext, useState, useEffect, useRef } from 'react';
-import { Bell, CheckCircle } from 'lucide-react';
+import { Bell, CheckCircle, ArrowLeftRight, UserPlus2, Activity } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 import { AuthContext } from '../context/AuthContext';
@@ -11,6 +11,8 @@ const Topbar = ({ title }) => {
   const navigate = useNavigate();
   const dropdownRef = useRef(null);
   const { user } = useContext(AuthContext);
+  const audioCtxRef = useRef(null);
+  const audioReadyRef = useRef(false);
 
   const fetchNotifications = async () => {
     try {
@@ -24,6 +26,15 @@ const Topbar = ({ title }) => {
   useEffect(() => {
     if (!user?._id) return;
     fetchNotifications();
+    const interval = window.setInterval(fetchNotifications, 20000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') fetchNotifications();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?._id]);
 
@@ -34,18 +45,74 @@ const Topbar = ({ title }) => {
 
     const onNotification = ({ notification }) => {
       if (!notification) return;
-      setNotifications((prev) => [notification, ...prev].slice(0, 50));
+      setNotifications((prev) => {
+        const exists = prev.some((n) => String(n._id) === String(notification._id));
+        if (exists) return prev;
+        return [notification, ...prev].slice(0, 50);
+      });
+      playNotificationTone();
     };
 
+    const onConnect = () => {
+      joinUserRoom(user._id);
+      fetchNotifications();
+    };
+
+    s.on('connect', onConnect);
     s.on('notification:new', onNotification);
 
     const onPresence = () => {};
     s.on('presence:update', onPresence);
     return () => {
+      s.off('connect', onConnect);
       s.off('notification:new', onNotification);
       s.off('presence:update', onPresence);
     };
   }, [user?._id]);
+
+  useEffect(() => {
+    const primeAudio = async () => {
+      const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextCtor) return;
+      if (!audioCtxRef.current) audioCtxRef.current = new AudioContextCtor();
+      try {
+        if (audioCtxRef.current.state === 'suspended') {
+          await audioCtxRef.current.resume();
+        }
+        audioReadyRef.current = true;
+      } catch (e) {}
+    };
+    window.addEventListener('pointerdown', primeAudio, { once: true });
+    return () => window.removeEventListener('pointerdown', primeAudio);
+  }, []);
+
+  const playNotificationTone = () => {
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextCtor) return;
+    if (!audioCtxRef.current) audioCtxRef.current = new AudioContextCtor();
+    const ctx = audioCtxRef.current;
+    if (!ctx || (ctx.state === 'suspended' && !audioReadyRef.current)) return;
+
+    const now = ctx.currentTime;
+    const makeBeep = (offset, frequency, gainValue) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(frequency, now + offset);
+      gain.gain.setValueAtTime(0.0001, now + offset);
+      gain.gain.exponentialRampToValueAtTime(gainValue, now + offset + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + offset + 0.18);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + offset);
+      osc.stop(now + offset + 0.2);
+    };
+
+    try {
+      makeBeep(0, 880, 0.05);
+      makeBeep(0.12, 1174, 0.04);
+    } catch (e) {}
+  };
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -77,6 +144,28 @@ const Topbar = ({ title }) => {
   };
 
   const unreadCount = notifications.filter(n => !n.read).length;
+  const getNotificationMeta = (type) => {
+    switch (type) {
+      case 'ISSUE_ASSIGNED':
+        return { icon: UserPlus2, dot: 'bg-blue-500', text: 'text-blue-700', label: 'Assigned' };
+      case 'STATUS_CHANGE':
+        return { icon: ArrowLeftRight, dot: 'bg-purple-500', text: 'text-purple-700', label: 'Status' };
+      default:
+        return { icon: Activity, dot: 'bg-gray-500', text: 'text-gray-700', label: 'Update' };
+    }
+  };
+
+  const groupedNotifications = notifications.reduce((acc, notif) => {
+    const d = new Date(notif.createdAt);
+    const today = new Date();
+    const startToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const startNotifDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const dayDiff = Math.round((startToday - startNotifDay) / (1000 * 60 * 60 * 24));
+    const bucket = dayDiff === 0 ? 'Today' : dayDiff === 1 ? 'Yesterday' : 'Earlier';
+    if (!acc[bucket]) acc[bucket] = [];
+    acc[bucket].push(notif);
+    return acc;
+  }, {});
 
   return (
     <header className="flex items-center justify-between px-8 py-4 border-b border-gray-200 shadow-sm relative bg-white text-gray-800">
@@ -108,24 +197,51 @@ const Topbar = ({ title }) => {
                 {notifications.length === 0 ? (
                   <div className="text-center py-6 text-sm text-gray-500">No notifications</div>
                 ) : (
-                  notifications.map(notif => (
-                    <div 
-                      key={notif._id} 
-                      onClick={() => handleNotificationClick(notif)}
-                      className={`p-3 rounded-lg mb-1 cursor-pointer transition ${
-                        notif.read
-                          ? 'bg-white hover:bg-gray-50'
-                          : 'bg-blue-50 hover:bg-blue-100'
-                      }`}
-                    >
-                      <p className={`text-sm ${
-                        notif.read ? 'text-gray-600' : 'text-gray-900 font-semibold'
-                      }`}>{notif.message}</p>
-                      <span className="text-xs mt-1 block text-gray-400">
-                        {new Date(notif.createdAt).toLocaleString()}
-                      </span>
-                    </div>
-                  ))
+                  ['Today', 'Yesterday', 'Earlier'].map((section) => {
+                    const items = groupedNotifications[section] || [];
+                    if (items.length === 0) return null;
+                    return (
+                      <div key={section} className="mb-2">
+                        <div className="px-2 py-1 text-[11px] font-bold uppercase tracking-wider text-gray-400">
+                          {section}
+                        </div>
+                        {items.map((notif) => {
+                          const meta = getNotificationMeta(notif.type);
+                          const Icon = meta.icon;
+                          return (
+                            <div
+                              key={notif._id}
+                              onClick={() => handleNotificationClick(notif)}
+                              className={`p-3 rounded-lg mb-1 cursor-pointer transition border ${
+                                notif.read
+                                  ? 'bg-white hover:bg-gray-50 border-transparent'
+                                  : 'bg-blue-50 hover:bg-blue-100 border-blue-100'
+                              }`}
+                            >
+                              <div className="flex items-start gap-2">
+                                <div className={`w-7 h-7 mt-0.5 rounded-full flex items-center justify-center text-white ${meta.dot}`}>
+                                  <Icon size={14} />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className={`text-[11px] font-bold uppercase tracking-wide mb-1 ${meta.text}`}>
+                                    {meta.label}
+                                  </div>
+                                  <p className={`text-sm ${
+                                    notif.read ? 'text-gray-600' : 'text-gray-900 font-semibold'
+                                  }`}>
+                                    {notif.message}
+                                  </p>
+                                  <span className="text-xs mt-1 block text-gray-400">
+                                    {new Date(notif.createdAt).toLocaleString()}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </div>

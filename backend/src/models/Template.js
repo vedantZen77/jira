@@ -28,7 +28,7 @@ const templateSchema = new mongoose.Schema(
           description: { type: String, default: '' },
           issueType: { type: String, default: 'Task' },
           priority: { type: String, default: 'Medium' },
-          labels: [{ type: String }],
+          labels: [{ type: mongoose.Schema.Types.Mixed }],
           checklist: [
             {
               text: { type: String, trim: true },

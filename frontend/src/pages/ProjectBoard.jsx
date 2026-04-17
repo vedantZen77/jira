@@ -10,6 +10,30 @@ import { Plus, MoreHorizontal, Users, UserPlus, Shield, ChevronDown, Download } 
 import TicketDetailsModal from '../components/TicketDetailsModal';
 
 const statuses = ['Backlog', 'Todo', 'In Progress', 'In Review', 'Testing', 'Done'];
+const LABEL_COLORS = [
+  { id: 'red', className: 'bg-red-500' },
+  { id: 'orange', className: 'bg-orange-500' },
+  { id: 'yellow', className: 'bg-yellow-500' },
+  { id: 'green', className: 'bg-green-500' },
+  { id: 'blue', className: 'bg-blue-500' },
+  { id: 'purple', className: 'bg-purple-500' },
+];
+
+const normalizeIssueLabels = (labels) => {
+  if (!Array.isArray(labels)) return [];
+  return labels
+    .map((label) => {
+      if (typeof label === 'string') {
+        const text = label.trim();
+        return text ? { text, color: 'blue' } : null;
+      }
+      const text = String(label?.text || '').trim();
+      if (!text) return null;
+      const color = LABEL_COLORS.some((c) => c.id === label?.color) ? label.color : 'blue';
+      return { text, color };
+    })
+    .filter(Boolean);
+};
 
 const getStatusColor = (status) => {
   switch (status) {
@@ -113,8 +137,10 @@ const ProjectBoard = () => {
   const [selectedIssue, setSelectedIssue] = useState(null);
   const [exporting, setExporting] = useState(false);
   const [newIssue, setNewIssue] = useState({
-    title: '', description: '', issueType: 'Task', priority: 'Medium', assignee: '', assignees: [], status: 'Todo'
+    title: '', description: '', issueType: 'Task', priority: 'Medium', assignee: '', assignees: [], status: 'Todo', labels: []
   });
+  const [newLabelText, setNewLabelText] = useState('');
+  const [newLabelColor, setNewLabelColor] = useState('blue');
   const [draggingIssueId, setDraggingIssueId] = useState(null);
 
   // Fetch logic
@@ -296,7 +322,9 @@ const ProjectBoard = () => {
         projectId: id,
       });
       setIsCreateModalOpen(false);
-      setNewIssue({ title: '', description: '', issueType: 'Task', priority: 'Medium', assignee: '', assignees: [], status: 'Todo' });
+      setNewIssue({ title: '', description: '', issueType: 'Task', priority: 'Medium', assignee: '', assignees: [], status: 'Todo', labels: [] });
+      setNewLabelText('');
+      setNewLabelColor('blue');
       fetchProjectData();
     } catch (err) {
       showToast(err.response?.data?.message || 'Failed to create issue', 'error');
@@ -723,6 +751,15 @@ const ProjectBoard = () => {
                               <div className="mt-auto flex items-center justify-between">
                                 <div className="flex items-center space-x-2">
                                   {getPriorityPill(issue.priority)}
+                                  <div className="flex items-center gap-1">
+                                    {normalizeIssueLabels(issue.labels).slice(0, 6).map((label, idx) => (
+                                      <span
+                                        key={`${issue._id}-label-dot-${idx}`}
+                                        className={`inline-block w-2.5 h-2.5 rounded-full ${LABEL_COLORS.find((c) => c.id === label.color)?.className || 'bg-blue-500'}`}
+                                        title={label.text}
+                                      />
+                                    ))}
+                                  </div>
                                   <div className="flex -space-x-1.5 object-cover">
                                      {getIssueAssigneeList(issue).length > 0 ? (
                                        <>
@@ -804,7 +841,6 @@ const ProjectBoard = () => {
                   <option value="Task">Task</option>
                   <option value="Bug">Bug</option>
                   <option value="Feature">Feature</option>
-                  <option value="Epic">Epic</option>
                 </select>
               </div>
               <div className="mb-4">
@@ -838,6 +874,71 @@ const ProjectBoard = () => {
                   <option value="High">High</option>
                   <option value="Critical">Critical</option>
                 </select>
+              </div>
+              <div className="mb-6">
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Labels</label>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {normalizeIssueLabels(newIssue.labels).length === 0 ? (
+                    <span className="text-xs text-gray-400 italic">No labels added</span>
+                  ) : (
+                    normalizeIssueLabels(newIssue.labels).map((label, idx) => (
+                      <div key={`${label.text}-${idx}`} className="flex items-center gap-1.5 px-2 py-1 rounded-full border border-gray-200 bg-white text-xs">
+                        <span className={`inline-block w-2 h-2 rounded-full ${LABEL_COLORS.find((c) => c.id === label.color)?.className || 'bg-blue-500'}`} />
+                        <span className="font-medium text-gray-700">{label.text}</span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setNewIssue((prev) => ({
+                              ...prev,
+                              labels: normalizeIssueLabels(prev.labels).filter((_, i) => i !== idx),
+                            }))
+                          }
+                          className="text-gray-400 hover:text-red-500"
+                        >
+                          &times;
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    value={newLabelText}
+                    onChange={(e) => setNewLabelText(e.target.value)}
+                    placeholder="Label text..."
+                  />
+                  <div className="flex items-center gap-1 border border-gray-300 rounded-lg px-2 py-2 bg-white">
+                    {LABEL_COLORS.map((color) => (
+                      <button
+                        key={color.id}
+                        type="button"
+                        onClick={() => setNewLabelColor(color.id)}
+                        className={`w-4 h-4 rounded-full ${color.className} ${newLabelColor === color.id ? 'ring-2 ring-offset-1 ring-gray-400' : ''}`}
+                      />
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const text = newLabelText.trim();
+                      if (!text) return;
+                      const existing = normalizeIssueLabels(newIssue.labels).some(
+                        (l) => l.text.toLowerCase() === text.toLowerCase() && l.color === newLabelColor
+                      );
+                      if (existing) return;
+                      setNewIssue((prev) => ({
+                        ...prev,
+                        labels: [...normalizeIssueLabels(prev.labels), { text, color: newLabelColor }],
+                      }));
+                      setNewLabelText('');
+                    }}
+                    className="px-3 py-2 rounded-lg font-semibold text-white bg-blue-600 hover:bg-blue-700"
+                  >
+                    Add
+                  </button>
+                </div>
               </div>
               <div className="mb-6">
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Assignees</label>
@@ -1099,7 +1200,7 @@ const ProjectBoard = () => {
                                 <div className="text-xs text-gray-500 mt-1 truncate">
                                   {issue.issueType || 'Task'}
                                   {Array.isArray(issue.labels) && issue.labels.length > 0
-                                    ? ` • ${issue.labels.slice(0, 3).join(', ')}`
+                                    ? ` • ${normalizeIssueLabels(issue.labels).slice(0, 3).map((l) => l.text).join(', ')}`
                                     : ''}
                                 </div>
                               </div>

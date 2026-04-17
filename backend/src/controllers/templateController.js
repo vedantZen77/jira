@@ -12,6 +12,24 @@ const isLead = (project, userId) => {
   return leads.some((l) => l?.toString?.() === uid);
 };
 
+const normalizeLabelObjects = (labels) => {
+  if (!Array.isArray(labels)) return [];
+  return labels
+    .map((label) => {
+      if (typeof label === 'string') {
+        const text = label.trim();
+        return text ? { text, color: 'blue' } : null;
+      }
+      const text = String(label?.text || '').trim();
+      if (!text) return null;
+      const color = ['red', 'orange', 'yellow', 'green', 'blue', 'purple'].includes(label?.color)
+        ? label.color
+        : 'blue';
+      return { text, color };
+    })
+    .filter(Boolean);
+};
+
 const normalizeTemplateTickets = (tickets) => {
   if (!Array.isArray(tickets)) return [];
   return tickets
@@ -29,7 +47,7 @@ const buildTemplateSnapshot = (issue) => ({
   description: issue?.description || '',
   issueType: issue?.issueType || 'Task',
   priority: issue?.priority || 'Medium',
-  labels: Array.isArray(issue?.labels) ? issue.labels : [],
+  labels: normalizeLabelObjects(issue?.labels),
   checklist: Array.isArray(issue?.checklist)
     ? issue.checklist.map((item) => ({
         text: String(item?.text || ''),
@@ -264,7 +282,7 @@ const getTemplateTickets = async (req, res) => {
               description: snapshot.description || '',
               issueType: snapshot.issueType || 'Task',
               priority: snapshot.priority || 'Medium',
-              labels: Array.isArray(snapshot.labels) ? snapshot.labels : [],
+          labels: normalizeLabelObjects(snapshot.labels),
               checklist: Array.isArray(snapshot.checklist) ? snapshot.checklist : [],
               storyPoints: snapshot.storyPoints,
               assignee: null,
@@ -365,7 +383,7 @@ const applyTemplateToProject = async (req, res) => {
           assignee: null,
           assignees: [],
           reporter: req.user._id,
-          labels: Array.isArray(src.labels) ? src.labels : [],
+          labels: normalizeLabelObjects(src.labels),
           // Copy checklist items, but always reset completion state on import.
           checklist: Array.isArray(src.checklist)
             ? src.checklist.map((item) => ({

@@ -2,6 +2,7 @@ const Issue = require('../models/Issue');
 const Project = require('../models/Project');
 const Notification = require('../models/Notification');
 const { getIO } = require('../socket');
+const LABEL_COLORS = ['red', 'orange', 'yellow', 'green', 'blue', 'purple'];
 
 const populateIssueQuery = (query) =>
   query
@@ -21,6 +22,32 @@ const normalizeIssueAssigneeIds = (issueDoc) => {
       ? [issueDoc.assignee]
       : [];
   return rawAssignees.map((a) => String(a?._id || a)).filter(Boolean);
+};
+
+const normalizeIssueLabels = (labels) => {
+  if (!Array.isArray(labels)) return [];
+  const normalized = labels
+    .map((label) => {
+      if (typeof label === 'string') {
+        const text = label.trim();
+        if (!text) return null;
+        return { text, color: 'blue' };
+      }
+      const text = String(label?.text || '').trim();
+      if (!text) return null;
+      const color = LABEL_COLORS.includes(label?.color) ? label.color : 'blue';
+      return { text, color };
+    })
+    .filter(Boolean);
+
+  // keep unique by text+color to avoid duplicates
+  const seen = new Set();
+  return normalized.filter((label) => {
+    const key = `${label.text.toLowerCase()}::${label.color}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 };
 
 // @desc    Get all issues for a project
@@ -102,7 +129,7 @@ const createIssue = async (req, res) => {
       projectId,
       assignee: normalizedAssignees.length > 0 ? normalizedAssignees[0] : null,
       assignees: normalizedAssignees,
-      labels,
+      labels: normalizeIssueLabels(labels),
       dueDate,
       storyPoints,
       reporter: req.user._id,
@@ -222,7 +249,11 @@ const updateIssue = async (req, res) => {
         if (field === 'status' && req.body[field] !== issue.status) {
            statusChanged = true;
         }
-        issue[field] = req.body[field];
+        if (field === 'labels') {
+          issue[field] = normalizeIssueLabels(req.body[field]);
+        } else {
+          issue[field] = req.body[field];
+        }
       }
     });
 

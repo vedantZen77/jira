@@ -56,7 +56,7 @@ const TemplateCardPreview = ({ issue, selected, onToggle, disabled }) => {
                 key={`${lab}-${idx}`}
                 className="text-[11px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 border border-gray-200"
               >
-                {lab}
+                {typeof lab === 'string' ? lab : (lab?.text || '')}
               </span>
             ))}
           </div>

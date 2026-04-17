@@ -47,7 +47,7 @@ const issueSchema = new mongoose.Schema(
     },
     labels: [
       {
-        type: String,
+        type: mongoose.Schema.Types.Mixed,
       },
     ],
     dueDate: {

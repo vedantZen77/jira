@@ -29,6 +29,24 @@ const parseDateOrNull = (value) => {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
+const normalizeBackupLabels = (labels) => {
+  if (!Array.isArray(labels)) return [];
+  return labels
+    .map((label) => {
+      if (typeof label === 'string') {
+        const text = label.trim();
+        return text ? { text, color: 'blue' } : null;
+      }
+      const text = String(label?.text || '').trim();
+      if (!text) return null;
+      const color = ['red', 'orange', 'yellow', 'green', 'blue', 'purple'].includes(label?.color)
+        ? label.color
+        : 'blue';
+      return { text, color };
+    })
+    .filter(Boolean);
+};
+
 // @desc    Get all projects for a user
 // @route   GET /api/projects
 // @access  Private
@@ -304,7 +322,7 @@ const exportProjectBackup = async (req, res) => {
         assignee: issue.assignee ? String(issue.assignee) : null,
         assignees: Array.isArray(issue.assignees) ? issue.assignees.map((a) => String(a)) : [],
         reporter: issue.reporter ? String(issue.reporter) : null,
-        labels: Array.isArray(issue.labels) ? issue.labels : [],
+        labels: normalizeBackupLabels(issue.labels),
         dueDate: issue.dueDate || null,
         storyPoints: issue.storyPoints ?? null,
         checklist: Array.isArray(issue.checklist) ? issue.checklist : [],
@@ -451,9 +469,7 @@ const importProjectBackup = async (req, res) => {
           if (reporterId && assignableUserSet.has(reporterId)) return reporterId;
           return req.user._id;
         })(),
-        labels: Array.isArray(issue?.labels)
-          ? issue.labels.filter((l) => typeof l === 'string' && l.trim().length > 0)
-          : [],
+        labels: normalizeBackupLabels(issue?.labels),
         dueDate: parseDateOrNull(issue?.dueDate),
         storyPoints: Number.isFinite(Number(issue?.storyPoints)) ? Number(issue.storyPoints) : undefined,
         completedAt: parseDateOrNull(issue?.completedAt),

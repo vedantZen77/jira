@@ -15,6 +15,14 @@ import {
 } from 'lucide-react';
 
 const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
+  const LABEL_COLORS = [
+    { id: 'red', className: 'bg-red-500' },
+    { id: 'orange', className: 'bg-orange-500' },
+    { id: 'yellow', className: 'bg-yellow-500' },
+    { id: 'green', className: 'bg-green-500' },
+    { id: 'blue', className: 'bg-blue-500' },
+    { id: 'purple', className: 'bg-purple-500' },
+  ];
   const { user } = useContext(AuthContext);
   const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState('details');
@@ -36,6 +44,9 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
   const iterationInputRef = useRef(null);
   const iterationListRef = useRef(null);
   const [newChecklistText, setNewChecklistText] = useState('');
+  const [newLabelText, setNewLabelText] = useState('');
+  const [newLabelColor, setNewLabelColor] = useState('blue');
+  const [isLabelModalOpen, setIsLabelModalOpen] = useState(false);
 
   const getUrgencyStyles = () => {
     const dueOverdue = issue?.dueDate && new Date(issue.dueDate).getTime() < Date.now() && issue.status !== 'Done';
@@ -129,6 +140,22 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
   const lifelineIterations = Array.isArray(issue?.lifeline?.iterations)
     ? [...issue.lifeline.iterations].sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0))
     : [];
+  const normalizedLabels = Array.isArray(issue?.labels)
+    ? issue.labels
+        .map((label) => {
+          if (typeof label === 'string') {
+            const text = label.trim();
+            return text ? { text, color: 'blue' } : null;
+          }
+          const text = String(label?.text || '').trim();
+          if (!text) return null;
+          return {
+            text,
+            color: LABEL_COLORS.some((c) => c.id === label?.color) ? label.color : 'blue',
+          };
+        })
+        .filter(Boolean)
+    : [];
 
   const getInitial = (name) => (String(name || '?').trim().charAt(0) || '?').toUpperCase();
   const formatDateTime = (value) => {
@@ -182,6 +209,42 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
     if (!assigneeSelectId) return;
     const next = Array.from(new Set([...currentAssigneeIds, String(assigneeSelectId)]));
     handleAssigneesUpdate(next);
+  };
+
+  const handleAddLabel = async () => {
+    const text = newLabelText.trim();
+    if (!text) return false;
+    const exists = normalizedLabels.some((l) => l.text.toLowerCase() === text.toLowerCase() && l.color === newLabelColor);
+    if (exists) return false;
+    try {
+      setLoading(true);
+      const { data } = await api.put(`/issues/${issue._id}`, {
+        labels: [...normalizedLabels, { text, color: newLabelColor }],
+      });
+      onUpdate(data);
+      setEditedIssue((prev) => ({ ...prev, ...data }));
+      setNewLabelText('');
+      return true;
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to add label', 'error');
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRemoveLabel = async (index) => {
+    try {
+      setLoading(true);
+      const next = normalizedLabels.filter((_, idx) => idx !== index);
+      const { data } = await api.put(`/issues/${issue._id}`, { labels: next });
+      onUpdate(data);
+      setEditedIssue((prev) => ({ ...prev, ...data }));
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to remove label', 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -492,9 +555,9 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
               <div className="flex flex-col h-full">
                 <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-gray-200 pb-3">
                   {[
-                    { id: 'assigned', label: 'Assigned' },
-                    { id: 'status', label: 'Status' },
-                    { id: 'iteration', label: 'Iteration' },
+                    { id: 'assigned', label: `Assigned (${lifelineAssigned.length})` },
+                    { id: 'status', label: `Status (${lifelineStatus.length})` },
+                    { id: 'iteration', label: `Iteration (${lifelineIterations.length})` },
                   ].map((tab) => (
                     <button
                       key={tab.id}
@@ -735,27 +798,31 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
 
               <div>
                 <label className="text-xs font-semibold text-gray-500 uppercase">Priority</label>
-                <select 
-                  className="w-full mt-1 px-3 py-2 border border-gray-300 rounded bg-white text-sm"
-                  value={editedIssue.priority}
-                  onChange={(e) => handlePriorityChange(e.target.value)}
-                  disabled={loading}
-                >
-                  {['Low', 'Medium', 'High', 'Critical'].map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
+                <div className="mt-1 rounded-xl border border-gray-200 bg-white p-2">
+                  <select 
+                    className="h-10 w-full px-3 border border-gray-300 rounded-lg bg-gray-50 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    value={editedIssue.priority}
+                    onChange={(e) => handlePriorityChange(e.target.value)}
+                    disabled={loading}
+                  >
+                    {['Low', 'Medium', 'High', 'Critical'].map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
               </div>
 
               <div>
                 <label className="text-xs font-semibold text-gray-500 uppercase">Due Date</label>
-                <div className="mt-1 relative">
-                  <Calendar className="absolute left-3 top-2.5 text-gray-400" size={16} />
-                  <input
-                    type="date"
-                    className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded bg-white text-sm"
-                    value={editedIssue.dueDate ? new Date(editedIssue.dueDate).toISOString().slice(0, 10) : ''}
-                    onChange={(e) => handleDueDateChange(e.target.value || null)}
-                    disabled={loading}
-                  />
+                <div className="mt-1 rounded-xl border border-gray-200 bg-white p-2">
+                  <div className="relative">
+                    <Calendar className="absolute left-3 top-3 text-gray-400" size={16} />
+                    <input
+                      type="date"
+                      className="h-10 w-full pl-9 pr-3 border border-gray-300 rounded-lg bg-gray-50 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      value={editedIssue.dueDate ? new Date(editedIssue.dueDate).toISOString().slice(0, 10) : ''}
+                      onChange={(e) => handleDueDateChange(e.target.value || null)}
+                      disabled={loading}
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -767,13 +834,45 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
                     value={editedIssue.issueType}
                     onChange={(e) => setEditedIssue({...editedIssue, issueType: e.target.value})}
                   >
-                    {['Bug', 'Feature', 'Task', 'Epic'].map(s => <option key={s} value={s}>{s}</option>)}
+                    {['Bug', 'Feature', 'Task'].map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                 ) : (
                    <div className="mt-1 font-medium text-gray-800 text-sm flex items-center">
                      <span className="px-2 py-0.5 bg-gray-100 rounded border">{issue.issueType}</span>
                    </div>
                 )}
+              </div>
+
+              <div className="pt-4 border-t border-gray-200 mt-4">
+                <label className="text-xs font-semibold text-gray-500 uppercase">Labels</label>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {normalizedLabels.length === 0 ? (
+                    <span className="text-xs text-gray-400 italic">No labels</span>
+                  ) : (
+                    normalizedLabels.map((label, idx) => (
+                      <div key={`${label.text}-${idx}`} className="flex items-center gap-1.5 px-2 py-1 rounded-full border border-gray-200 bg-white text-xs">
+                        <span className={`inline-block w-2 h-2 rounded-full ${LABEL_COLORS.find((c) => c.id === label.color)?.className || 'bg-blue-500'}`} />
+                        <span className="font-medium text-gray-700">{label.text}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveLabel(idx)}
+                          className="text-gray-400 hover:text-red-500 ml-0.5"
+                          disabled={loading}
+                          title="Remove label"
+                        >
+                          &times;
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsLabelModalOpen(true)}
+                  className="mt-3 px-3 py-2 rounded-lg font-semibold text-sm text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200"
+                >
+                  Add Label
+                </button>
               </div>
 
               <div className="pt-4 border-t border-gray-200 mt-4">
@@ -806,30 +905,32 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
                   </div>
                 )}
 
-                <div className="mt-3 flex items-center gap-2">
-                  <select
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    value={assigneeSelectId}
-                    onChange={(e) => setAssigneeSelectId(e.target.value)}
-                  >
-                    <option value="">Add person...</option>
-                    {availableMembers
-                      .filter((u) => !currentAssigneeIds.includes(String(u?._id)))
-                      .map((u) => (
-                        <option key={String(u._id)} value={u._id}>
-                          {u.name}
-                        </option>
-                      ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={handleAddAssignee}
-                    disabled={!assigneeSelectId || loading}
-                    className="px-3 py-2 rounded-lg font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="Add assignee"
-                  >
-                    Add
-                  </button>
+                <div className="mt-3 rounded-xl border border-gray-200 bg-white p-2">
+                  <div className="flex items-center gap-2">
+                    <select
+                      className="h-10 flex-1 px-3 border border-gray-300 rounded-lg bg-gray-50 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      value={assigneeSelectId}
+                      onChange={(e) => setAssigneeSelectId(e.target.value)}
+                    >
+                      <option value="">Add person...</option>
+                      {availableMembers
+                        .filter((u) => !currentAssigneeIds.includes(String(u?._id)))
+                        .map((u) => (
+                          <option key={String(u._id)} value={u._id}>
+                            {u.name}
+                          </option>
+                        ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={handleAddAssignee}
+                      disabled={!assigneeSelectId || loading}
+                      className="h-10 px-4 rounded-lg font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                      title="Add assignee"
+                    >
+                      Add
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -892,6 +993,63 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
         </div>
 
       </div>
+      {isLabelModalOpen && (
+        <div className="absolute inset-0 z-50 bg-black/30 backdrop-blur-[1px] flex items-center justify-center p-4">
+          <div className="w-full max-w-sm rounded-xl bg-white border border-gray-200 shadow-2xl p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-bold text-gray-800 uppercase tracking-wide">Add Label</h4>
+              <button
+                type="button"
+                onClick={() => setIsLabelModalOpen(false)}
+                className="text-gray-400 hover:text-gray-700"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <input
+                type="text"
+                value={newLabelText}
+                onChange={(e) => setNewLabelText(e.target.value)}
+                placeholder="Label text..."
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={loading}
+              />
+              <div className="flex items-center gap-2">
+                {LABEL_COLORS.map((color) => (
+                  <button
+                    key={color.id}
+                    type="button"
+                    onClick={() => setNewLabelColor(color.id)}
+                    className={`w-6 h-6 rounded-full ${color.className} ${newLabelColor === color.id ? 'ring-2 ring-offset-2 ring-gray-400' : ''}`}
+                    title={color.id}
+                  />
+                ))}
+              </div>
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsLabelModalOpen(false)}
+                className="px-3 py-2 rounded-lg font-semibold text-sm text-gray-600 bg-gray-100 hover:bg-gray-200"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const created = await handleAddLabel();
+                  if (created) setIsLabelModalOpen(false);
+                }}
+                disabled={loading || !newLabelText.trim()}
+                className="px-3 py-2 rounded-lg font-semibold text-sm text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Save Label
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

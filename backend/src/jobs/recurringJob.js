@@ -12,6 +12,24 @@ const cloneChecklist = (checklist) => {
   }));
 };
 
+const normalizeLabels = (labels) => {
+  if (!Array.isArray(labels)) return [];
+  return labels
+    .map((label) => {
+      if (typeof label === 'string') {
+        const text = label.trim();
+        return text ? { text, color: 'blue' } : null;
+      }
+      const text = String(label?.text || '').trim();
+      if (!text) return null;
+      const color = ['red', 'orange', 'yellow', 'green', 'blue', 'purple'].includes(label?.color)
+        ? label.color
+        : 'blue';
+      return { text, color };
+    })
+    .filter(Boolean);
+};
+
 const getTemplateStatus = (template) => template?.defaultStatus || 'Backlog';
 
 const addInterval = (date, recurringType) => {
@@ -87,7 +105,7 @@ function startRecurringJob() {
               assignee: null,
               assignees: [],
               reporter: s.createdBy,
-              labels: Array.isArray(src.labels) ? src.labels : [],
+              labels: normalizeLabels(src.labels),
               checklist: Array.isArray(src.checklist) ? cloneChecklist(src.checklist) : [],
               dueDate: null,
               storyPoints: src.storyPoints,
