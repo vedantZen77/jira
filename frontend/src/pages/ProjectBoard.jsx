@@ -142,6 +142,7 @@ const ProjectBoard = () => {
   const [newLabelText, setNewLabelText] = useState('');
   const [newLabelColor, setNewLabelColor] = useState('blue');
   const [draggingIssueId, setDraggingIssueId] = useState(null);
+  const [creatingIssue, setCreatingIssue] = useState(false);
 
   // Fetch logic
   const fetchProjectData = async () => {
@@ -311,6 +312,8 @@ const ProjectBoard = () => {
 
   const handleCreateIssue = async (e) => {
     e.preventDefault();
+    if (creatingIssue) return;
+    setCreatingIssue(true);
     try {
       const nextAssignees = Array.isArray(newIssue.assignees) && newIssue.assignees.length > 0
         ? newIssue.assignees
@@ -328,6 +331,8 @@ const ProjectBoard = () => {
       fetchProjectData();
     } catch (err) {
       showToast(err.response?.data?.message || 'Failed to create issue', 'error');
+    } finally {
+      setCreatingIssue(false);
     }
   };
 
@@ -959,7 +964,7 @@ const ProjectBoard = () => {
               </div>
               <div className="flex justify-end space-x-3">
                 <button type="button" onClick={() => setIsCreateModalOpen(false)} className="px-5 py-2.5 rounded-lg font-semibold text-gray-600 bg-gray-100 hover:bg-gray-200">Cancel</button>
-                <button type="submit" className="px-5 py-2.5 rounded-lg font-semibold text-white bg-blue-600 hover:bg-blue-700">Create</button>
+                <button type="submit" disabled={creatingIssue} className="px-5 py-2.5 rounded-lg font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">{creatingIssue ? 'Creating...' : 'Create'}</button>
               </div>
             </form>
           </div>
