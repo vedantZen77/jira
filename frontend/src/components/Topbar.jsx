@@ -19,14 +19,14 @@ const Topbar = ({ title }) => {
       const { data } = await api.get('/notifications');
       setNotifications(data);
     } catch (err) {
-      console.error('Failed to fetch notifications');
+      console.error('Failed to fetch notifications', err.response?.data || err.message);
     }
   };
 
   useEffect(() => {
     if (!user?._id) return;
     fetchNotifications();
-    const interval = window.setInterval(fetchNotifications, 20000);
+    const interval = window.setInterval(fetchNotifications, 5000); // Reduced to 5 seconds
     const onVisible = () => {
       if (document.visibilityState === 'visible') fetchNotifications();
     };
