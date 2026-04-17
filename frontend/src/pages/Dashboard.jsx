@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useContext, useRef } from 'react';
 import { AuthContext } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import Layout from '../components/Layout';
 import api from '../utils/api';
 import { Plus, Briefcase, ChevronRight, Search, Key, Trash2, Upload } from 'lucide-react';
@@ -7,6 +8,7 @@ import { Link } from 'react-router-dom';
 
 const Dashboard = () => {
   const { user } = useContext(AuthContext);
+  const { showToast } = useToast();
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -54,7 +56,7 @@ const Dashboard = () => {
       setNewProject({ name: '', key: '', description: '' });
       fetchProjects();
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to create project');
+      showToast(err.response?.data?.message || 'Failed to create project', 'error');
     }
   };
 
@@ -72,7 +74,7 @@ const Dashboard = () => {
       await api.delete(`/projects/${project._id}`);
       setProjects(projects.filter(p => p._id !== project._id));
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to delete project');
+      showToast(err.response?.data?.message || 'Failed to delete project', 'error');
     } finally {
       setDeletingId(null);
     }
@@ -93,11 +95,13 @@ const Dashboard = () => {
       const parsed = JSON.parse(raw);
       const { data } = await api.post('/projects/import', parsed);
       await fetchProjects();
-      alert(
-        `Project imported successfully. ${data?.importedIssues || 0} tickets and ${data?.importedComments || 0} comments restored.`
+      showToast(
+        `Project imported successfully. ${data?.importedIssues || 0} tickets and ${data?.importedComments || 0} comments restored.`,
+        'success',
+        3600
       );
     } catch (err) {
-      alert(err.response?.data?.message || err.message || 'Failed to import project backup');
+      showToast(err.response?.data?.message || err.message || 'Failed to import project backup', 'error');
     } finally {
       setImporting(false);
     }

@@ -3,6 +3,26 @@ const Project = require('../models/Project');
 const Notification = require('../models/Notification');
 const { getIO } = require('../socket');
 
+const populateIssueQuery = (query) =>
+  query
+    .populate('assignee', 'name email avatar')
+    .populate('assignees', 'name email avatar')
+    .populate('reporter', 'name email avatar')
+    .populate('projectId', 'name key')
+    .populate('lifeline.assigned.assignee', 'name email avatar')
+    .populate('lifeline.assigned.actor', 'name email avatar')
+    .populate('lifeline.status.actor', 'name email avatar')
+    .populate('lifeline.iterations.author', 'name email avatar');
+
+const normalizeIssueAssigneeIds = (issueDoc) => {
+  const rawAssignees = Array.isArray(issueDoc?.assignees) && issueDoc.assignees.length > 0
+    ? issueDoc.assignees
+    : issueDoc?.assignee
+      ? [issueDoc.assignee]
+      : [];
+  return rawAssignees.map((a) => String(a?._id || a)).filter(Boolean);
+};
+
 // @desc    Get all issues for a project
 // @route   GET /api/issues/project/:projectId
 // @access  Private
@@ -12,13 +32,12 @@ const getIssuesByProject = async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit || '200', 10), 1), 500);
     const skip = (page - 1) * limit;
 
-    const issues = await Issue.find({ projectId: req.params.projectId })
-      .populate('assignee', 'name email avatar')
-      .populate('assignees', 'name email avatar')
-      .populate('reporter', 'name email avatar')
+    const issues = await populateIssueQuery(
+      Issue.find({ projectId: req.params.projectId })
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(limit);
+      .limit(limit)
+    );
 
     res.json(issues);
   } catch (error) {
@@ -31,11 +50,7 @@ const getIssuesByProject = async (req, res) => {
 // @access  Private
 const getIssueById = async (req, res) => {
   try {
-    const issue = await Issue.findById(req.params.id)
-      .populate('assignee', 'name email avatar')
-      .populate('assignees', 'name email avatar')
-      .populate('reporter', 'name email avatar')
-      .populate('projectId', 'name key');
+    const issue = await populateIssueQuery(Issue.findById(req.params.id));
 
     if (!issue) {
       return res.status(404).json({ message: 'Issue not found' });
@@ -91,6 +106,23 @@ const createIssue = async (req, res) => {
       dueDate,
       storyPoints,
       reporter: req.user._id,
+      lifeline: {
+        assigned: normalizedAssignees.map((assigneeId) => ({
+          assignee: assigneeId,
+          action: 'assigned',
+          actor: req.user._id,
+          changedAt: new Date(),
+        })),
+        status: [
+          {
+            from: null,
+            to: status || 'Todo',
+            actor: req.user._id,
+            changedAt: new Date(),
+          },
+        ],
+        iterations: [],
+      },
     });
 
     const createdIssue = await issue.save();
@@ -111,11 +143,7 @@ const createIssue = async (req, res) => {
     }
 
     // Return populated issue for creator UI consistency
-    const populated = await Issue.findById(createdIssue._id)
-      .populate('assignee', 'name email avatar')
-      .populate('assignees', 'name email avatar')
-      .populate('reporter', 'name email avatar')
-      .populate('projectId', 'name key');
+    const populated = await populateIssueQuery(Issue.findById(createdIssue._id));
 
     const boardAssigneeIds = Array.isArray(populated.assignees) && populated.assignees.length > 0
       ? populated.assignees.map((a) => (a?._id ? a._id : a))
@@ -170,9 +198,7 @@ const updateIssue = async (req, res) => {
       'storyPoints',
     ];
 
-    const oldAssignees = Array.isArray(issue.assignees) && issue.assignees.length > 0
-      ? issue.assignees.map((a) => (a?._id ? a._id : a))
-      : (issue.assignee ? [String(issue.assignee)] : []);
+    const oldAssignees = normalizeIssueAssigneeIds(issue);
 
     let assigneeChanged = false;
     let statusChanged = false;
@@ -206,6 +232,48 @@ const updateIssue = async (req, res) => {
       issue.assignee = issue.assignees.length > 0 ? issue.assignees[0] : null;
     } else {
       issue.assignees = issue.assignee ? [issue.assignee] : [];
+    }
+
+    const nextAssignees = normalizeIssueAssigneeIds(issue);
+    if (!issue.lifeline || typeof issue.lifeline !== 'object') {
+      issue.lifeline = { assigned: [], status: [], iterations: [] };
+    }
+    if (!Array.isArray(issue.lifeline.assigned)) issue.lifeline.assigned = [];
+    if (!Array.isArray(issue.lifeline.status)) issue.lifeline.status = [];
+    if (!Array.isArray(issue.lifeline.iterations)) issue.lifeline.iterations = [];
+
+    if (assigneeChanged) {
+      const oldSet = new Set(oldAssignees.map(String));
+      const nextSet = new Set(nextAssignees.map(String));
+      for (const assigneeId of nextSet) {
+        if (!oldSet.has(String(assigneeId))) {
+          issue.lifeline.assigned.push({
+            assignee: assigneeId,
+            action: 'assigned',
+            actor: req.user._id,
+            changedAt: new Date(),
+          });
+        }
+      }
+      for (const assigneeId of oldSet) {
+        if (!nextSet.has(String(assigneeId))) {
+          issue.lifeline.assigned.push({
+            assignee: assigneeId,
+            action: 'unassigned',
+            actor: req.user._id,
+            changedAt: new Date(),
+          });
+        }
+      }
+    }
+
+    if (statusChanged) {
+      issue.lifeline.status.push({
+        from: oldStatus || null,
+        to: issue.status,
+        actor: req.user._id,
+        changedAt: new Date(),
+      });
     }
 
     const updatedIssue = await issue.save();
@@ -251,11 +319,7 @@ const updateIssue = async (req, res) => {
     }
 
     // Return populated issue
-    const populatedIssue = await Issue.findById(updatedIssue._id)
-      .populate('assignee', 'name email avatar')
-      .populate('assignees', 'name email avatar')
-      .populate('reporter', 'name email avatar')
-      .populate('projectId', 'name key');
+    const populatedIssue = await populateIssueQuery(Issue.findById(updatedIssue._id));
 
     try {
       const projectId = populatedIssue.projectId?._id ? populatedIssue.projectId._id : populatedIssue.projectId;
@@ -346,11 +410,7 @@ const updateIssuePriority = async (req, res) => {
     issue.priority = priority;
     const updated = await issue.save();
 
-    const populated = await Issue.findById(updated._id)
-      .populate('assignee', 'name email avatar')
-      .populate('assignees', 'name email avatar')
-      .populate('reporter', 'name email avatar')
-      .populate('projectId', 'name key');
+    const populated = await populateIssueQuery(Issue.findById(updated._id));
 
     try {
       const projectId = updated.projectId?._id ? updated.projectId._id : updated.projectId;
@@ -392,11 +452,7 @@ const updateIssueDueDate = async (req, res) => {
     issue.dueDate = parsed;
     const updated = await issue.save();
 
-    const populated = await Issue.findById(updated._id)
-      .populate('assignee', 'name email avatar')
-      .populate('assignees', 'name email avatar')
-      .populate('reporter', 'name email avatar')
-      .populate('projectId', 'name key');
+    const populated = await populateIssueQuery(Issue.findById(updated._id));
 
     try {
       const projectId = updated.projectId?._id ? updated.projectId._id : updated.projectId;
@@ -442,11 +498,7 @@ const updateIssueChecklist = async (req, res) => {
     issue.checklist = normalized;
     await issue.save();
 
-    const populated = await Issue.findById(issue._id)
-      .populate('assignee', 'name email avatar')
-      .populate('assignees', 'name email avatar')
-      .populate('reporter', 'name email avatar')
-      .populate('projectId', 'name key');
+    const populated = await populateIssueQuery(Issue.findById(issue._id));
 
     try {
       const projectId = issue.projectId?._id ? issue.projectId._id : issue.projectId;
@@ -471,6 +523,51 @@ const updateIssueChecklist = async (req, res) => {
   }
 };
 
+// @desc    Add an iteration update in issue lifeline
+// @route   POST /api/issues/:id/lifeline/iterations
+// @access  Private (assignees only)
+const addIssueIteration = async (req, res) => {
+  try {
+    const content = String(req.body?.content || '').trim();
+    if (!content) {
+      return res.status(400).json({ message: 'Iteration content is required' });
+    }
+
+    const issue = await Issue.findById(req.params.id);
+    if (!issue) {
+      return res.status(404).json({ message: 'Issue not found' });
+    }
+
+    const assigneeIds = normalizeIssueAssigneeIds(issue);
+    const canAdd = assigneeIds.includes(String(req.user._id));
+    if (!canAdd) {
+      return res.status(403).json({ message: 'Only assignees can add iteration updates' });
+    }
+
+    if (!issue.lifeline || typeof issue.lifeline !== 'object') {
+      issue.lifeline = { assigned: [], status: [], iterations: [] };
+    }
+    if (!Array.isArray(issue.lifeline.iterations)) issue.lifeline.iterations = [];
+
+    issue.lifeline.iterations.push({
+      author: req.user._id,
+      content,
+      createdAt: new Date(),
+    });
+    await issue.save();
+
+    const populatedIssue = await populateIssueQuery(Issue.findById(issue._id));
+    try {
+      const projectId = populatedIssue.projectId?._id ? populatedIssue.projectId._id : populatedIssue.projectId;
+      getIO().to(`project:${projectId}`).emit('issue:updated', { issue: populatedIssue });
+    } catch (e) {}
+
+    res.status(201).json(populatedIssue);
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
 module.exports = {
   getIssuesByProject,
   getIssueById,
@@ -480,4 +577,5 @@ module.exports = {
   updateIssueDueDate,
   deleteIssue,
   updateIssueChecklist,
+  addIssueIteration,
 };

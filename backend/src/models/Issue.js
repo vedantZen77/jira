@@ -75,6 +75,72 @@ const issueSchema = new mongoose.Schema(
     lastGeneratedAt: {
       type: Date,
     },
+    lifeline: {
+      assigned: [
+        {
+          assignee: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            required: true,
+          },
+          action: {
+            type: String,
+            enum: ['assigned', 'unassigned'],
+            required: true,
+          },
+          actor: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            required: true,
+          },
+          changedAt: {
+            type: Date,
+            default: Date.now,
+          },
+        },
+      ],
+      status: [
+        {
+          from: {
+            type: String,
+            enum: ['Backlog', 'Todo', 'In Progress', 'In Review', 'Testing', 'Done', null],
+            default: null,
+          },
+          to: {
+            type: String,
+            enum: ['Backlog', 'Todo', 'In Progress', 'In Review', 'Testing', 'Done'],
+            required: true,
+          },
+          actor: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            required: true,
+          },
+          changedAt: {
+            type: Date,
+            default: Date.now,
+          },
+        },
+      ],
+      iterations: [
+        {
+          author: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            required: true,
+          },
+          content: {
+            type: String,
+            required: true,
+            trim: true,
+          },
+          createdAt: {
+            type: Date,
+            default: Date.now,
+          },
+        },
+      ],
+    },
   },
   {
     timestamps: true,

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useContext } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import Layout from '../components/Layout';
 import api from '../utils/api';
 import { AuthContext } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import { connectSocket, joinProjectRoom, leaveProjectRoom } from '../utils/socket';
 import DicebearAvatar from '../components/DicebearAvatar';
 import { Plus, MoreHorizontal, Users, UserPlus, Shield, ChevronDown, Download } from 'lucide-react';
@@ -82,8 +83,8 @@ const ChecklistProgressBar = ({ issue }) => {
 
 const ProjectBoard = () => {
   const { id } = useParams();
-  const navigate = useNavigate();
   const { user } = useContext(AuthContext);
+  const { showToast } = useToast();
   
   const [project, setProject] = useState(null);
   const [issues, setIssues] = useState([]);
@@ -200,7 +201,7 @@ const ProjectBoard = () => {
       setIsLeadsModalOpen(false);
       fetchProjectData();
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to update leads');
+      showToast(err.response?.data?.message || 'Failed to update leads', 'error');
     }
   };
 
@@ -217,7 +218,7 @@ const ProjectBoard = () => {
       setTemplateTickets([]);
       setSelectedImportTicketIds([]);
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to load templates');
+      showToast(err.response?.data?.message || 'Failed to load templates', 'error');
     } finally {
       setTemplatesLoading(false);
     }
@@ -226,11 +227,11 @@ const ProjectBoard = () => {
   const handleApplyTemplates = async (e) => {
     e.preventDefault();
     if (!selectedTemplateId) {
-      alert('Select a template');
+      showToast('Select a template', 'warning');
       return;
     }
     if (!Array.isArray(selectedImportTicketIds) || selectedImportTicketIds.length === 0) {
-      alert('Select at least one ticket to import');
+      showToast('Select at least one ticket to import', 'warning');
       return;
     }
     try {
@@ -245,7 +246,7 @@ const ProjectBoard = () => {
       // Ensure UI resets and columns reflect status immediately
       fetchProjectData();
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to apply templates');
+      showToast(err.response?.data?.message || 'Failed to apply templates', 'error');
     }
   };
 
@@ -292,7 +293,7 @@ const ProjectBoard = () => {
       setNewIssue({ title: '', description: '', issueType: 'Task', priority: 'Medium', assignee: '', assignees: [], status: 'Todo' });
       fetchProjectData();
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to create issue');
+      showToast(err.response?.data?.message || 'Failed to create issue', 'error');
     }
   };
 
@@ -321,7 +322,7 @@ const ProjectBoard = () => {
       setIssues(issues.map(i => i._id === issueId ? { ...i, status: newStatus } : i));
       await api.put(`/issues/${issueId}`, { status: newStatus });
     } catch (err) {
-      alert('Failed to update status');
+      showToast('Failed to update status', 'error');
       fetchProjectData(); // Revert on failure
     }
   };
@@ -332,7 +333,7 @@ const ProjectBoard = () => {
     try {
       const currentMemberIds = project.members.map(m => m._id);
       if (currentMemberIds.includes(selectedUserId) || project.createdBy._id === selectedUserId) {
-        alert("User is already a member");
+        showToast('User is already a member', 'warning');
         return;
       }
       await api.put(`/projects/${id}`, { members: [...currentMemberIds, selectedUserId] });
@@ -340,13 +341,13 @@ const ProjectBoard = () => {
       setSelectedUserId('');
       fetchProjectData();
     } catch (err) {
-      alert('Failed to add member');
+      showToast('Failed to add member', 'error');
     }
   };
 
   const handleExportProject = async () => {
     const confirmed = window.confirm(
-      'Exporting will archive this project and delete it from the database. Continue?'
+      'Export this project backup now? This will download JSON only and keep the project unchanged.'
     );
     if (!confirmed) return;
 
@@ -368,10 +369,9 @@ const ProjectBoard = () => {
       anchor.click();
       document.body.removeChild(anchor);
       URL.revokeObjectURL(url);
-      alert('Project exported and removed from database successfully.');
-      navigate('/dashboard');
+      showToast('Project exported successfully. Your project is still active.', 'success');
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to export project');
+      showToast(err.response?.data?.message || 'Failed to export project', 'error');
     } finally {
       setExporting(false);
     }
@@ -521,7 +521,7 @@ const ProjectBoard = () => {
                        const updatedMembers = project.members.map(m=>m._id).filter(id => id !== member._id);
                        await api.put(`/projects/${id}`, { members: updatedMembers });
                        fetchProjectData();
-                     } catch(err) { alert('Failed to remove member'); }
+                    } catch(err) { showToast('Failed to remove member', 'error'); }
                    }
                  }}
                  className="ml-2 text-gray-400 hover:text-red-500 focus:outline-none"

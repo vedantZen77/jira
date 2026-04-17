@@ -1,15 +1,27 @@
 import React, { useState, useEffect, useContext, useRef } from 'react';
 import api from '../utils/api';
 import { AuthContext } from '../context/AuthContext';
-import { X, MessageSquare, Send, Calendar, MoreHorizontal, Trash2 } from 'lucide-react';
+import { useToast } from '../context/ToastContext';
+import {
+  X,
+  Send,
+  Calendar,
+  MoreHorizontal,
+  Trash2,
+  ArrowRight,
+  UserPlus,
+  UserMinus,
+  CircleDot,
+} from 'lucide-react';
 
 const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
   const { user } = useContext(AuthContext);
+  const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState('details');
+  const [lifelineTab, setLifelineTab] = useState('assigned');
   const [editMode, setEditMode] = useState(false);
   const [editedIssue, setEditedIssue] = useState({ ...issue });
-  const [comments, setComments] = useState([]);
-  const [newComment, setNewComment] = useState('');
+  const [newIteration, setNewIteration] = useState('');
   const [loading, setLoading] = useState(false);
 
   // Template integration (Add this ticket to a template)
@@ -21,6 +33,8 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [assigneeSelectId, setAssigneeSelectId] = useState('');
   const actionsMenuRef = useRef(null);
+  const iterationInputRef = useRef(null);
+  const iterationListRef = useRef(null);
   const [newChecklistText, setNewChecklistText] = useState('');
 
   const getUrgencyStyles = () => {
@@ -59,7 +73,7 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
       await api.delete(`/issues/${issue._id}`);
       onClose?.();
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to delete issue');
+      showToast(err.response?.data?.message || 'Failed to delete issue', 'error');
     } finally {
       setLoading(false);
     }
@@ -67,18 +81,18 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
 
   const handleAddToTemplate = async () => {
     if (!selectedTemplateId) {
-      alert('Select a template first');
+      showToast('Select a template first', 'warning');
       return;
     }
     try {
       setLoading(true);
       await api.post(`/templates/${selectedTemplateId}/tickets`, { ticketId: issue._id });
-      alert('Added to template');
+      showToast('Added to template', 'success');
       setSelectedTemplateId('');
       setShowTemplatePicker(false);
       setActionsOpen(false);
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to add to template');
+      showToast(err.response?.data?.message || 'Failed to add to template', 'error');
     } finally {
       setLoading(false);
     }
@@ -106,6 +120,39 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
   const currentAssigneeIds = currentAssigneeObjs.map((u) => String(u._id));
   const isIssueAssignee = currentAssigneeIds.includes(String(user?._id));
   const canManageSubtasks = isIssueCreator || isIssueAssignee;
+  const lifelineAssigned = Array.isArray(issue?.lifeline?.assigned)
+    ? [...issue.lifeline.assigned].sort((a, b) => new Date(b.changedAt || 0) - new Date(a.changedAt || 0))
+    : [];
+  const lifelineStatus = Array.isArray(issue?.lifeline?.status)
+    ? [...issue.lifeline.status].sort((a, b) => new Date(b.changedAt || 0) - new Date(a.changedAt || 0))
+    : [];
+  const lifelineIterations = Array.isArray(issue?.lifeline?.iterations)
+    ? [...issue.lifeline.iterations].sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0))
+    : [];
+
+  const getInitial = (name) => (String(name || '?').trim().charAt(0) || '?').toUpperCase();
+  const formatDateTime = (value) => {
+    const parsed = value ? new Date(value) : null;
+    return parsed && !Number.isNaN(parsed.getTime()) ? parsed.toLocaleString() : 'Unknown time';
+  };
+  const getStatusBadge = (status) => {
+    switch (status) {
+      case 'Backlog':
+        return 'bg-gray-100 text-gray-700 border-gray-200';
+      case 'Todo':
+        return 'bg-blue-50 text-blue-700 border-blue-200';
+      case 'In Progress':
+        return 'bg-yellow-50 text-yellow-700 border-yellow-200';
+      case 'In Review':
+        return 'bg-purple-50 text-purple-700 border-purple-200';
+      case 'Testing':
+        return 'bg-orange-50 text-orange-700 border-orange-200';
+      case 'Done':
+        return 'bg-green-50 text-green-700 border-green-200';
+      default:
+        return 'bg-gray-100 text-gray-700 border-gray-200';
+    }
+  };
 
   const handleAssigneesUpdate = async (nextIds) => {
     const normalized = Array.isArray(nextIds) ? nextIds.filter(Boolean).map(String) : [];
@@ -120,7 +167,7 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
       setEditedIssue((prev) => ({ ...prev, ...data }));
       setAssigneeSelectId('');
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to update assignees');
+      showToast(err.response?.data?.message || 'Failed to update assignees', 'error');
     } finally {
       setLoading(false);
     }
@@ -136,12 +183,6 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
     const next = Array.from(new Set([...currentAssigneeIds, String(assigneeSelectId)]));
     handleAssigneesUpdate(next);
   };
-
-  useEffect(() => {
-    if (activeTab === 'comments') {
-      fetchComments();
-    }
-  }, [activeTab]);
 
   useEffect(() => {
     const loadTemplates = async () => {
@@ -178,14 +219,21 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
     return () => document.removeEventListener('mousedown', onDown);
   }, [actionsOpen]);
 
-  const fetchComments = async () => {
-    try {
-      const { data } = await api.get(`/comments/issue/${issue._id}`);
-      setComments(data);
-    } catch (err) {
-      console.error(err);
+  useEffect(() => {
+    if (activeTab === 'lifeline' && lifelineTab === 'iteration') {
+      const timer = setTimeout(() => {
+        iterationInputRef.current?.focus();
+      }, 0);
+      return () => clearTimeout(timer);
     }
-  };
+  }, [activeTab, lifelineTab]);
+
+  useEffect(() => {
+    if (activeTab !== 'lifeline' || lifelineTab !== 'iteration') return;
+    const list = iterationListRef.current;
+    if (!list) return;
+    list.scrollTop = list.scrollHeight;
+  }, [activeTab, lifelineTab, lifelineIterations.length]);
 
   const handleSave = async () => {
     try {
@@ -194,7 +242,7 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
       onUpdate(data);
       setEditMode(false);
     } catch (err) {
-      alert('Failed to update issue');
+      showToast('Failed to update issue', 'error');
     } finally {
       setLoading(false);
     }
@@ -207,7 +255,7 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
       onUpdate(data);
       setEditedIssue((prev) => ({ ...prev, priority: data.priority }));
     } catch (err) {
-      alert('Failed to update priority');
+      showToast('Failed to update priority', 'error');
     } finally {
       setLoading(false);
     }
@@ -220,7 +268,7 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
       onUpdate(data);
       setEditedIssue((prev) => ({ ...prev, dueDate: data.dueDate }));
     } catch (err) {
-      alert('Failed to update due date');
+      showToast('Failed to update due date', 'error');
     } finally {
       setLoading(false);
     }
@@ -242,7 +290,7 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
       onUpdate(data);
       setEditedIssue((prev) => ({ ...prev, checklist: data.checklist }));
     } catch (err) {
-      alert('Failed to update checklist');
+      showToast('Failed to update checklist', 'error');
     } finally {
       setLoading(false);
     }
@@ -260,7 +308,7 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
       setEditedIssue((prev) => ({ ...prev, checklist: data.checklist }));
       setNewChecklistText('');
     } catch (err) {
-      alert('Failed to add checklist item');
+      showToast('Failed to add checklist item', 'error');
     } finally {
       setLoading(false);
     }
@@ -276,21 +324,26 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
       onUpdate(data);
       setEditedIssue((prev) => ({ ...prev, checklist: data.checklist }));
     } catch (err) {
-      alert('Failed to delete subtask');
+      showToast('Failed to delete subtask', 'error');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleAddComment = async (e) => {
+  const handleAddIteration = async (e) => {
     e.preventDefault();
-    if (!newComment.trim()) return;
+    if (!newIteration.trim()) return;
     try {
-      const { data } = await api.post('/comments', { ticketId: issue._id, content: newComment });
-      setComments([...comments, data]);
-      setNewComment('');
+      setLoading(true);
+      const { data } = await api.post(`/issues/${issue._id}/lifeline/iterations`, { content: newIteration.trim() });
+      onUpdate(data);
+      setEditedIssue((prev) => ({ ...prev, ...data }));
+      setNewIteration('');
+      setTimeout(() => iterationInputRef.current?.focus(), 0);
     } catch (err) {
-      alert('Failed to add comment');
+      showToast(err.response?.data?.message || 'Failed to add iteration update', 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -334,10 +387,10 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
                 Details
               </button>
               <button 
-                className={`py-2 px-4 font-semibold text-sm ${activeTab === 'comments' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
-                onClick={() => setActiveTab('comments')}
+                className={`py-2 px-4 font-semibold text-sm ${activeTab === 'lifeline' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                onClick={() => setActiveTab('lifeline')}
               >
-                Comments
+                Lifeline
               </button>
             </div>
 
@@ -437,42 +490,174 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
               </div>
             ) : (
               <div className="flex flex-col h-full">
-                <div className="flex-1 overflow-y-auto mb-4 space-y-4 pr-2">
-                  {comments.length === 0 ? (
-                    <div className="text-center py-8 text-gray-500">No comments yet. Be the first to comment!</div>
-                  ) : (
-                    comments.map(comment => (
-                      <div key={comment._id} className="flex space-x-3">
-                        <div className="w-8 h-8 rounded-full bg-blue-500 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold">
-                          {comment.author?.name?.charAt(0) || 'U'}
-                        </div>
-                        <div className="bg-gray-50 p-3 rounded-lg rounded-tl-none flex-1">
-                          <div className="flex justify-between items-baseline mb-1">
-                            <span className="font-semibold text-sm text-gray-800">{comment.author?.name}</span>
-                            <span className="text-xs text-gray-400">{new Date(comment.createdAt).toLocaleString()}</span>
+                <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-gray-200 pb-3">
+                  {[
+                    { id: 'assigned', label: 'Assigned' },
+                    { id: 'status', label: 'Status' },
+                    { id: 'iteration', label: 'Iteration' },
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setLifelineTab(tab.id)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                        lifelineTab === tab.id
+                          ? 'bg-blue-100 text-blue-700'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div ref={iterationListRef} className="flex-1 overflow-y-auto mb-4 space-y-3 pr-2">
+                  {lifelineTab === 'assigned' && (
+                    <>
+                      {lifelineAssigned.length === 0 ? (
+                        <div className="text-center py-8 text-gray-500">No assignment activity yet.</div>
+                      ) : (
+                        lifelineAssigned.map((entry, idx) => (
+                          <div key={`${entry._id || idx}-assigned`} className="relative pl-10">
+                            <div className="absolute left-4 top-2 bottom-0 w-px bg-gray-200" />
+                            <div className="absolute left-1.5 top-2 h-5 w-5 rounded-full bg-white border-2 border-blue-200 flex items-center justify-center">
+                              <CircleDot size={10} className="text-blue-600" />
+                            </div>
+                            <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="w-7 h-7 rounded-full bg-blue-100 text-blue-700 text-xs font-bold flex items-center justify-center">
+                                    {getInitial(entry.assignee?.name)}
+                                  </span>
+                                  <span className="text-sm font-semibold text-gray-800 truncate">
+                                    {entry.assignee?.name || 'Unknown user'}
+                                  </span>
+                                </div>
+                                <span
+                                  className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full border ${
+                                    entry.action === 'unassigned'
+                                      ? 'bg-red-50 text-red-700 border-red-200'
+                                      : 'bg-green-50 text-green-700 border-green-200'
+                                  }`}
+                                >
+                                  {entry.action === 'unassigned' ? <UserMinus size={12} /> : <UserPlus size={12} />}
+                                  {entry.action === 'unassigned' ? 'Arrow Out' : 'Arrow In'}
+                                </span>
+                              </div>
+                              <div className="mt-2 text-xs text-gray-500">
+                                by {entry.actor?.name || 'Unknown'} on {formatDateTime(entry.changedAt)}
+                              </div>
+                            </div>
                           </div>
-                          <p className="text-sm text-gray-700">{comment.content}</p>
-                        </div>
-                      </div>
-                    ))
+                        ))
+                      )}
+                    </>
+                  )}
+
+                  {lifelineTab === 'status' && (
+                    <>
+                      {lifelineStatus.length === 0 ? (
+                        <div className="text-center py-8 text-gray-500">No status history available.</div>
+                      ) : (
+                        lifelineStatus.map((entry, idx) => (
+                          <div key={`${entry._id || idx}-status`} className="relative pl-10">
+                            <div className="absolute left-4 top-2 bottom-0 w-px bg-gray-200" />
+                            <div className="absolute left-1.5 top-2 h-5 w-5 rounded-full bg-white border-2 border-purple-200 flex items-center justify-center">
+                              <CircleDot size={10} className="text-purple-600" />
+                            </div>
+                            <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
+                              <div className="flex flex-wrap items-center gap-2">
+                                {entry.from ? (
+                                  <>
+                                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${getStatusBadge(entry.from)}`}>
+                                      {entry.from}
+                                    </span>
+                                    <ArrowRight size={14} className="text-gray-400" />
+                                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${getStatusBadge(entry.to)}`}>
+                                      {entry.to}
+                                    </span>
+                                  </>
+                                ) : (
+                                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${getStatusBadge(entry.to)}`}>
+                                    Created as {entry.to}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="mt-2 text-xs text-gray-500">
+                                by {entry.actor?.name || 'Unknown'} on {formatDateTime(entry.changedAt)}
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </>
+                  )}
+
+                  {lifelineTab === 'iteration' && (
+                    <>
+                      {lifelineIterations.length === 0 ? (
+                        <div className="text-center py-8 text-gray-500">No iteration updates yet.</div>
+                      ) : (
+                        lifelineIterations.map((entry, idx) => (
+                          <div
+                            key={`${entry._id || idx}-iteration`}
+                            className={`flex ${String(entry.author?._id || '') === String(user?._id || '') ? 'justify-end' : 'justify-start'}`}
+                          >
+                            <div className="max-w-[85%]">
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 text-[11px] font-bold flex items-center justify-center">
+                                  {getInitial(entry.author?.name)}
+                                </span>
+                                <span className="text-xs font-semibold text-gray-700">{entry.author?.name || 'Unknown'}</span>
+                                <span className="text-[11px] text-gray-400">{formatDateTime(entry.createdAt)}</span>
+                              </div>
+                              <div
+                                className={`rounded-2xl border px-3 py-2 text-sm whitespace-pre-wrap break-words ${
+                                  String(entry.author?._id || '') === String(user?._id || '')
+                                    ? 'bg-blue-600 text-white border-blue-600'
+                                    : 'bg-white text-gray-800 border-gray-200'
+                                }`}
+                              >
+                                {entry.content}
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </>
                   )}
                 </div>
-                
-                <form onSubmit={handleAddComment} className="flex items-end space-x-2 border-t pt-4">
-                  <div className="flex-1 relative">
-                    <MessageSquare className="absolute left-3 top-3 text-gray-400" size={18} />
-                    <input 
-                      type="text" 
-                      className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Add a comment..."
-                      value={newComment}
-                      onChange={(e) => setNewComment(e.target.value)}
-                    />
-                  </div>
-                  <button type="submit" disabled={!newComment.trim()} className="p-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">
-                    <Send size={18} />
-                  </button>
-                </form>
+
+                {lifelineTab === 'iteration' && (
+                  <form onSubmit={handleAddIteration} className="sticky bottom-0 border-t pt-3 bg-white">
+                    <div className="flex items-end gap-2 rounded-xl border border-gray-200 bg-gray-50 p-2">
+                    <div className="flex-1">
+                      <textarea
+                        ref={iterationInputRef}
+                        rows={1}
+                        className="w-full px-3 py-2 bg-transparent text-sm resize-none max-h-32 min-h-[40px] focus:outline-none"
+                        placeholder="Write an iteration update..."
+                        value={newIteration}
+                        onChange={(e) => setNewIteration(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            if (!loading && newIteration.trim()) handleAddIteration(e);
+                          }
+                        }}
+                        disabled={loading}
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={!newIteration.trim() || loading}
+                      className="p-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Send size={18} />
+                    </button>
+                    </div>
+                  </form>
+                )}
               </div>
             )}
           </div>

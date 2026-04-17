@@ -309,6 +309,7 @@ const exportProjectBackup = async (req, res) => {
         storyPoints: issue.storyPoints ?? null,
         checklist: Array.isArray(issue.checklist) ? issue.checklist : [],
         recurring: issue.recurring || null,
+        lifeline: issue.lifeline || { assigned: [], status: [], iterations: [] },
         lastGeneratedAt: issue.lastGeneratedAt || null,
         completedAt: issue.completedAt || null,
         createdAt: issue.createdAt || null,
@@ -323,13 +324,6 @@ const exportProjectBackup = async (req, res) => {
         updatedAt: comment.updatedAt || null,
       })),
     };
-
-    // Archive behavior: after export payload is prepared, remove project data from DB.
-    if (issueIds.length > 0) {
-      await Comment.deleteMany({ ticketId: { $in: issueIds } });
-    }
-    await Issue.deleteMany({ projectId: project._id });
-    await Project.deleteOne({ _id: project._id });
 
     res.json(payload);
   } catch (error) {
@@ -471,6 +465,56 @@ const importProjectBackup = async (req, res) => {
                   : undefined,
               }
             : undefined,
+        lifeline:
+          issue?.lifeline && typeof issue.lifeline === 'object'
+            ? {
+                assigned: Array.isArray(issue.lifeline.assigned)
+                  ? issue.lifeline.assigned
+                      .map((entry) => ({
+                        assignee: validObjectIdString(entry?.assignee),
+                        action: ['assigned', 'unassigned'].includes(entry?.action) ? entry.action : null,
+                        actor: validObjectIdString(entry?.actor) || req.user._id,
+                        changedAt: parseDateOrNull(entry?.changedAt) || new Date(),
+                      }))
+                      .filter((entry) => entry.assignee && entry.action)
+                  : [],
+                status: Array.isArray(issue.lifeline.status)
+                  ? issue.lifeline.status
+                      .map((entry) => ({
+                        from: ISSUE_STATUSES.includes(entry?.from) ? entry.from : null,
+                        to: ISSUE_STATUSES.includes(entry?.to) ? entry.to : status,
+                        actor: validObjectIdString(entry?.actor) || req.user._id,
+                        changedAt: parseDateOrNull(entry?.changedAt) || new Date(),
+                      }))
+                      .filter((entry) => entry.to)
+                  : [],
+                iterations: Array.isArray(issue.lifeline.iterations)
+                  ? issue.lifeline.iterations
+                      .map((entry) => ({
+                        author: validObjectIdString(entry?.author) || req.user._id,
+                        content: String(entry?.content || '').trim(),
+                        createdAt: parseDateOrNull(entry?.createdAt) || new Date(),
+                      }))
+                      .filter((entry) => entry.content)
+                  : [],
+              }
+            : {
+                assigned: normalizedAssigneeIds.map((assigneeId) => ({
+                  assignee: assigneeId,
+                  action: 'assigned',
+                  actor: req.user._id,
+                  changedAt: new Date(),
+                })),
+                status: [
+                  {
+                    from: null,
+                    to: status,
+                    actor: req.user._id,
+                    changedAt: new Date(),
+                  },
+                ],
+                iterations: [],
+              },
         lastGeneratedAt: parseDateOrNull(issue?.lastGeneratedAt),
         checklist: Array.isArray(issue?.checklist)
           ? issue.checklist

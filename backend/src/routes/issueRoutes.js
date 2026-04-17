@@ -9,6 +9,7 @@ const {
   updateIssueDueDate,
   deleteIssue,
   updateIssueChecklist,
+  addIssueIteration,
 } = require('../controllers/issueController');
 const { protect } = require('../middleware/authMiddleware');
 
@@ -17,6 +18,7 @@ router.route('/project/:projectId').get(protect, getIssuesByProject);
 router.patch('/:id/priority', protect, updateIssuePriority);
 router.patch('/:id/due-date', protect, updateIssueDueDate);
 router.patch('/:id/checklist', protect, updateIssueChecklist);
+router.post('/:id/lifeline/iterations', protect, addIssueIteration);
 router
   .route('/:id')
   .get(protect, getIssueById)

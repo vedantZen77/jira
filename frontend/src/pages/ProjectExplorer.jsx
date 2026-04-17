@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../api';
+import { useToast } from '../context/ToastContext';
 import { ArrowLeft, Upload, Check, X, History, Trash2 } from 'lucide-react';
 import FileTreeNode from '../components/FileTree';
 import { getFileIcon } from '../components/Icons';
@@ -15,6 +16,7 @@ import ZipUploadModal from '../components/modals/ZipUploadModal';
 const ProjectExplorer = () => {
     const { id } = useParams();
     const { user } = useAuth();
+    const { showToast } = useToast();
     const [project, setProject] = useState(null);
     const [assets, setAssets] = useState([]);
     const [currentPath, setCurrentPath] = useState('/');
@@ -87,7 +89,7 @@ const ProjectExplorer = () => {
         try {
             await api.put(`/assets/${asset._id}/versions/${version.versionNumber}/status`, { status: 'approved' });
             fetchData();
-        } catch (error) { alert('Failed to approve'); }
+        } catch (error) { showToast('Failed to approve', 'error'); }
     };
 
     const handleDelete = async (assetId) => {
@@ -96,7 +98,7 @@ const ProjectExplorer = () => {
             await api.delete(`/assets/${assetId}`);
             setAssets(prev => prev.filter(a => a._id !== assetId)); // Optimistic UI update
         } catch (error) {
-            alert('Failed to delete asset: ' + (error.response?.data?.message || error.message));
+            showToast('Failed to delete asset: ' + (error.response?.data?.message || error.message), 'error');
         }
     };
 

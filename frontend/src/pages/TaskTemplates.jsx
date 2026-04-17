@@ -2,6 +2,7 @@ import React, { useContext, useEffect, useMemo, useState } from 'react';
 import Layout from '../components/Layout';
 import api from '../utils/api';
 import { AuthContext } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import { Search, Plus, Trash2, Pencil } from 'lucide-react';
 
 const priorities = ['Low', 'Medium', 'High', 'Critical'];
@@ -67,6 +68,7 @@ const TemplateCardPreview = ({ issue, selected, onToggle, disabled }) => {
 
 const TaskTemplates = () => {
   const { user } = useContext(AuthContext);
+  const { showToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -203,15 +205,15 @@ const TaskTemplates = () => {
   const handleCreateTemplate = async (e) => {
     e.preventDefault();
     if (!name.trim()) {
-      alert('Template name is required');
+      showToast('Template name is required', 'warning');
       return;
     }
     if (scope === 'project' && !effectiveProjectId) {
-      alert('Select target project for project template');
+      showToast('Select target project for project template', 'warning');
       return;
     }
     if (selectedTicketIds.length === 0) {
-      alert('Select at least 1 ticket for the template');
+      showToast('Select at least 1 ticket for the template', 'warning');
       return;
     }
 
@@ -239,7 +241,7 @@ const TaskTemplates = () => {
       setTicketQuery('');
       fetchTemplates();
     } catch (e) {
-      alert(e.response?.data?.message || 'Failed to create template');
+      showToast(e.response?.data?.message || 'Failed to create template', 'error');
     } finally {
       setSaving(false);
     }
@@ -251,7 +253,7 @@ const TaskTemplates = () => {
       await api.delete(`/templates/${templateId}`);
       fetchTemplates();
     } catch (e) {
-      alert(e.response?.data?.message || 'Failed to delete template');
+      showToast(e.response?.data?.message || 'Failed to delete template', 'error');
     }
   };
 
@@ -287,7 +289,7 @@ const TaskTemplates = () => {
       setSelectedTicketIds(orderedTicketIds);
       setTicketQuery('');
     } catch (e) {
-      alert(e.response?.data?.message || 'Failed to load template for editing');
+      showToast(e.response?.data?.message || 'Failed to load template for editing', 'error');
     }
   };
 
@@ -308,7 +310,7 @@ const TaskTemplates = () => {
   const handleAddTicketsToTemplate = async () => {
     if (!addTicketsTemplate?._id) return;
     if (!Array.isArray(addTicketsSelectedTicketIds) || addTicketsSelectedTicketIds.length === 0) {
-      alert('Select at least one ticket to add');
+      showToast('Select at least one ticket to add', 'warning');
       return;
     }
 
@@ -324,7 +326,7 @@ const TaskTemplates = () => {
       setAddTicketsQuery('');
       fetchTemplates();
     } catch (e) {
-      alert(e.response?.data?.message || 'Failed to add tickets to template');
+      showToast(e.response?.data?.message || 'Failed to add tickets to template', 'error');
     } finally {
       setSaving(false);
     }
