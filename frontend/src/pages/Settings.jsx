@@ -6,7 +6,7 @@ import { User, Mail, Shield, KeyRound } from 'lucide-react';
 const Settings = () => {
   const { user, updateProfile, changePassword } = useContext(AuthContext);
   const [name, setName] = useState(user?.name || '');
-  const [role, setRole] = useState(user?.role || 'developer');
+  const [role, setRole] = useState(user?.role || 'dev');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -113,9 +113,9 @@ const Settings = () => {
                   value={role}
                   onChange={(e) => setRole(e.target.value)}
                 >
-                  <option value="admin">Admin</option>
                   <option value="manager">Manager</option>
-                  <option value="developer">Developer</option>
+                  <option value="dev">Dev</option>
+                  <option value="artist">Artist</option>
                   <option value="viewer">Viewer</option>
                 </select>
               </div>

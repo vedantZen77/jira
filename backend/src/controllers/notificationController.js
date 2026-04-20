@@ -1,13 +1,22 @@
 const Notification = require('../models/Notification');
 
 // @desc    Get user notifications
-// @route   GET /api/notifications
+// @route   GET /api/notifications/:userId
 // @access  Private
 const getNotifications = async (req, res) => {
   try {
-    const notifications = await Notification.find({ user: req.user._id })
+    const requestedUserId = String(req.params.userId || req.user?._id || '');
+    if (!requestedUserId) {
+      return res.status(400).json({ message: 'userId is required' });
+    }
+
+    if (req.user && String(req.user._id) !== requestedUserId) {
+      return res.status(403).json({ message: 'User not authorized' });
+    }
+
+    const notifications = await Notification.find({ userId: requestedUserId })
       .sort({ createdAt: -1 })
-      .limit(50); // Keep it reasonable
+      .limit(100);
     res.json(notifications);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -22,7 +31,7 @@ const markAsRead = async (req, res) => {
     const notification = await Notification.findById(req.params.id);
 
     if (notification) {
-      if (notification.user.toString() !== req.user._id.toString()) {
+      if (notification.userId !== String(req.user._id)) {
         res.status(401).json({ message: 'User not authorized' });
         return;
       }
@@ -43,7 +52,7 @@ const markAsRead = async (req, res) => {
 const markAllAsRead = async (req, res) => {
     try {
         await Notification.updateMany(
-            { user: req.user._id, read: false },
+            { userId: String(req.user._id), read: false },
             { $set: { read: true } }
         );
         res.json({ message: 'All notifications marked as read' });

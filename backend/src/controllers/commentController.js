@@ -1,5 +1,6 @@
 const Comment = require('../models/Comment');
 const Issue = require('../models/Issue');
+const { processNotificationEvent, NOTIFICATION_EVENTS } = require('../services/notificationEngine');
 
 // @desc    Get comments for an issue
 // @route   GET /api/comments/issue/:issueId
@@ -35,6 +36,13 @@ const createComment = async (req, res) => {
     });
 
     const createdComment = await comment.save();
+
+    await processNotificationEvent(NOTIFICATION_EVENTS.COMMENT_ADDED, {
+      actorId: req.user._id,
+      issueId: ticketId,
+      commentId: createdComment._id,
+      commentContent: content,
+    });
     
     // Return populated comment
     const populatedComment = await Comment.findById(createdComment._id)

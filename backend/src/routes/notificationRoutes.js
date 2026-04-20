@@ -7,7 +7,8 @@ const {
 } = require('../controllers/notificationController');
 const { protect } = require('../middleware/authMiddleware');
 
-router.get('/', protect, getNotifications);
+router.get('/:userId', protect, getNotifications);
+router.get('/', protect, getNotifications); // Backward compatibility
 router.put('/read-all', protect, markAllAsRead);
 router.put('/:id/read', protect, markAsRead);
 

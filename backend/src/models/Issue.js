@@ -24,6 +24,11 @@ const issueSchema = new mongoose.Schema(
       enum: ['Low', 'Medium', 'High', 'Critical'],
       default: 'Medium',
     },
+    riskLevel: {
+      type: String,
+      enum: ['Low', 'Medium', 'High', 'Critical'],
+      default: 'Low',
+    },
     projectId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Project',
@@ -63,6 +68,13 @@ const issueSchema = new mongoose.Schema(
       {
         text: { type: String, required: true, trim: true },
         completed: { type: Boolean, default: false },
+        assignee: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      },
+    ],
+    dependencies: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Issue',
       },
     ],
     // Recurring metadata copied from template (for visibility/auditing)
@@ -150,6 +162,7 @@ const issueSchema = new mongoose.Schema(
 issueSchema.index({ projectId: 1, status: 1 });
 issueSchema.index({ assignee: 1, status: 1 });
 issueSchema.index({ assignees: 1, status: 1 });
+issueSchema.index({ dependencies: 1 });
 issueSchema.index({ completedAt: 1 });
 issueSchema.index({ 'recurring.type': 1, lastGeneratedAt: 1 });
 

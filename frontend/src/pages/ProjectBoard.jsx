@@ -754,8 +754,13 @@ const ProjectBoard = () => {
                               <ChecklistProgressBar issue={issue} />
                               
                               <div className="mt-auto flex items-center justify-between">
-                                <div className="flex items-center space-x-2">
+                                <div className="flex items-center space-x-2 min-w-0">
                                   {getPriorityPill(issue.priority)}
+                                  {issue.riskLevel && issue.riskLevel !== 'Low' && (
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-100">
+                                      Risk: {issue.riskLevel}
+                                    </span>
+                                  )}
                                   <div className="flex items-center gap-1">
                                     {normalizeIssueLabels(issue.labels).slice(0, 6).map((label, idx) => (
                                       <span
@@ -765,44 +770,33 @@ const ProjectBoard = () => {
                                       />
                                     ))}
                                   </div>
-                                  <div className="flex -space-x-1.5 object-cover">
-                                     {getIssueAssigneeList(issue).length > 0 ? (
-                                       <>
-                                         {getIssueAssigneeList(issue).slice(0, 3).map((a, idx) => (
-                                           <div
-                                             key={`${issue._id}-assignee-${idx}-${String(a?._id || a)}`}
-                                             className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-white text-[10px] font-bold border-2 border-white ring-1 ring-gray-100"
-                                             title={a?.name || 'Assignee'}
-                                           >
-                                             {(a?.name || '?').charAt(0)}
-                                           </div>
-                                         ))}
-                                         {getIssueAssigneeList(issue).length > 3 && (
-                                           <div
-                                             className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-gray-700 text-[10px] font-bold border-2 border-white ring-1 ring-gray-100"
-                                             title={`${getIssueAssigneeList(issue).length - 3} more assignees`}
-                                           >
-                                             +{getIssueAssigneeList(issue).length - 3}
-                                           </div>
-                                         )}
-                                       </>
-                                     ) : (
-                                       <div className="w-6 h-6 rounded-full bg-gray-200 border-2 border-white flex items-center justify-center text-gray-400 text-[10px]" title="Unassigned">?</div>
-                                     )}
-                                  </div>
                                 </div>
 
-                                <select 
-                                  className="text-xs bg-gray-50 border border-gray-200 rounded p-1 text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500 opacity-0 group-hover:opacity-100 absolute right-3 bottom-3 transition-opacity"
-                                  value={issue.status}
-                                  onChange={(e) => {
-                                    e.stopPropagation();
-                                    handleStatusChange(issue._id, e.target.value);
-                                  }}
-                                  onClick={e => e.stopPropagation()}
-                                >
-                                  {statuses.map(s => <option key={s} value={s}>{s}</option>)}
-                                </select>
+                                <div className="flex -space-x-1.5 object-cover ml-3 shrink-0">
+                                  {getIssueAssigneeList(issue).length > 0 ? (
+                                    <>
+                                      {getIssueAssigneeList(issue).slice(0, 3).map((a, idx) => (
+                                        <div
+                                          key={`${issue._id}-assignee-${idx}-${String(a?._id || a)}`}
+                                          className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-white text-[10px] font-bold border-2 border-white ring-1 ring-gray-100"
+                                          title={a?.name || 'Assignee'}
+                                        >
+                                          {(a?.name || '?').charAt(0)}
+                                        </div>
+                                      ))}
+                                      {getIssueAssigneeList(issue).length > 3 && (
+                                        <div
+                                          className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-gray-700 text-[10px] font-bold border-2 border-white ring-1 ring-gray-100"
+                                          title={`${getIssueAssigneeList(issue).length - 3} more assignees`}
+                                        >
+                                          +{getIssueAssigneeList(issue).length - 3}
+                                        </div>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <div className="w-6 h-6 rounded-full bg-gray-200 border-2 border-white flex items-center justify-center text-gray-400 text-[10px]" title="Unassigned">?</div>
+                                  )}
+                                </div>
                               </div>
                             </div>
                           ))}

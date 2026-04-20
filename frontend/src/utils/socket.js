@@ -7,13 +7,19 @@ let hasJoinListener = false;
 function getSocketBaseUrl() {
   const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
   // If VITE_API_URL ends with /api, connect sockets to the same host origin
-  return apiBase.replace(/\/api\/?$/, '');
+  const normalizedBase = apiBase.replace(/\/api\/?$/, '');
+
+  // Force secure transport in production deployments.
+  if (/^http:\/\//i.test(normalizedBase) && !/localhost|127\.0\.0\.1/i.test(normalizedBase)) {
+    return normalizedBase.replace(/^http:\/\//i, 'https://');
+  }
+  return normalizedBase;
 }
 
 export function connectSocket() {
   if (!socket) {
     socket = io(getSocketBaseUrl(), {
-      transports: ['websocket', 'polling'],
+      transports: ['polling', 'websocket'],
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
@@ -25,7 +31,7 @@ export function connectSocket() {
     hasJoinListener = true;
     const rejoin = () => {
       if (joinedUserId) {
-        socket.emit('join:user', joinedUserId);
+        socket.emit('register', joinedUserId);
       }
     };
     socket.on('connect', rejoin);
@@ -47,7 +53,7 @@ export function joinUserRoom(userId) {
   joinedUserId = String(userId);
   const s = connectSocket();
   if (s.connected) {
-    s.emit('join:user', joinedUserId);
+    s.emit('register', joinedUserId);
   }
 }
 

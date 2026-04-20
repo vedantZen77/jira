@@ -8,7 +8,7 @@ const Register = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [role, setRole] = useState('developer');
+  const [role, setRole] = useState('dev');
   const [error, setError] = useState('');
   
   const { register, user } = useContext(AuthContext);
@@ -119,9 +119,9 @@ const Register = () => {
               value={role}
               onChange={(e) => setRole(e.target.value)}
             >
-              <option value="admin">Admin</option>
               <option value="manager">Manager</option>
-              <option value="developer">Developer</option>
+              <option value="dev">Dev</option>
+              <option value="artist">Artist</option>
               <option value="viewer">Viewer</option>
             </select>
           </div>

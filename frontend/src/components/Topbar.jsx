@@ -1,4 +1,4 @@
-import React, { useContext, useState, useEffect, useRef } from 'react';
+import React, { useCallback, useContext, useState, useEffect, useRef } from 'react';
 import { Bell, CheckCircle, ArrowLeftRight, UserPlus2, Activity } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
@@ -14,19 +14,37 @@ const Topbar = ({ title }) => {
   const audioCtxRef = useRef(null);
   const audioReadyRef = useRef(false);
 
-  const fetchNotifications = async () => {
+  const mergeNotifications = useCallback((incomingNotifications) => {
+    if (!Array.isArray(incomingNotifications) || incomingNotifications.length === 0) return;
+
+    setNotifications((previous) => {
+      const byId = new Map(previous.map((notification) => [String(notification._id), notification]));
+      incomingNotifications.forEach((notification) => {
+        if (!notification?._id) return;
+        byId.set(String(notification._id), notification);
+      });
+
+      return Array.from(byId.values())
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .slice(0, 100);
+    });
+  }, []);
+
+  const fetchNotifications = useCallback(async () => {
+    if (!user?._id) return;
     try {
-      const { data } = await api.get('/notifications');
-      setNotifications(data);
+      console.log('[notifications] polling fetch');
+      const { data } = await api.get(`/notifications/${user._id}`);
+      mergeNotifications(data);
     } catch (err) {
       console.error('Failed to fetch notifications');
     }
-  };
+  }, [mergeNotifications, user?._id]);
 
   useEffect(() => {
     if (!user?._id) return;
     fetchNotifications();
-    const interval = window.setInterval(fetchNotifications, 20000);
+    const interval = window.setInterval(fetchNotifications, 5000);
     const onVisible = () => {
       if (document.visibilityState === 'visible') fetchNotifications();
     };
@@ -35,8 +53,7 @@ const Topbar = ({ title }) => {
       window.clearInterval(interval);
       document.removeEventListener('visibilitychange', onVisible);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?._id]);
+  }, [fetchNotifications, user?._id]);
 
   useEffect(() => {
     if (!user?._id) return;
@@ -45,30 +62,36 @@ const Topbar = ({ title }) => {
 
     const onNotification = ({ notification }) => {
       if (!notification) return;
-      setNotifications((prev) => {
-        const exists = prev.some((n) => String(n._id) === String(notification._id));
-        if (exists) return prev;
-        return [notification, ...prev].slice(0, 50);
-      });
+      console.log('[notifications] received via socket', notification?._id);
+      mergeNotifications([notification]);
       playNotificationTone();
     };
 
     const onConnect = () => {
+      console.log('[socket] connected', s.id);
       joinUserRoom(user._id);
       fetchNotifications();
     };
 
+    const onDisconnect = (reason) => {
+      console.log('[socket] disconnected', reason);
+    };
+
     s.on('connect', onConnect);
-    s.on('notification:new', onNotification);
+    s.on('disconnect', onDisconnect);
+    s.on('receiveNotification', onNotification);
+    s.on('notification:new', onNotification); // Compatibility while backend rolls out.
 
     const onPresence = () => {};
     s.on('presence:update', onPresence);
     return () => {
       s.off('connect', onConnect);
+      s.off('disconnect', onDisconnect);
+      s.off('receiveNotification', onNotification);
       s.off('notification:new', onNotification);
       s.off('presence:update', onPresence);
     };
-  }, [user?._id]);
+  }, [fetchNotifications, mergeNotifications, user?._id]);
 
   useEffect(() => {
     const primeAudio = async () => {
@@ -146,10 +169,18 @@ const Topbar = ({ title }) => {
   const unreadCount = notifications.filter(n => !n.read).length;
   const getNotificationMeta = (type) => {
     switch (type) {
+      case 'TASK_ASSIGNED':
       case 'ISSUE_ASSIGNED':
         return { icon: UserPlus2, dot: 'bg-blue-500', text: 'text-blue-700', label: 'Assigned' };
+      case 'TASK_UPDATED':
       case 'STATUS_CHANGE':
         return { icon: ArrowLeftRight, dot: 'bg-purple-500', text: 'text-purple-700', label: 'Status' };
+      case 'TASK_OVERDUE':
+      case 'WORKLOAD_ALERT':
+        return { icon: Activity, dot: 'bg-red-500', text: 'text-red-700', label: 'Alert' };
+      case 'COMMENT_ADDED':
+      case 'MENTION':
+        return { icon: Activity, dot: 'bg-emerald-500', text: 'text-emerald-700', label: 'Comment' };
       default:
         return { icon: Activity, dot: 'bg-gray-500', text: 'text-gray-700', label: 'Update' };
     }
@@ -215,7 +246,9 @@ const Topbar = ({ title }) => {
                               className={`p-3 rounded-lg mb-1 cursor-pointer transition border ${
                                 notif.read
                                   ? 'bg-white hover:bg-gray-50 border-transparent'
-                                  : 'bg-blue-50 hover:bg-blue-100 border-blue-100'
+                                  : (notif.priority === 'critical' || notif.priority === 'high')
+                                    ? 'bg-red-50 hover:bg-red-100 border-red-100'
+                                    : 'bg-blue-50 hover:bg-blue-100 border-blue-100'
                               }`}
                             >
                               <div className="flex items-start gap-2">

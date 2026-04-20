@@ -1,7 +1,7 @@
 const Issue = require('../models/Issue');
 const Project = require('../models/Project');
-const Notification = require('../models/Notification');
 const { getIO } = require('../socket');
+const { processNotificationEvent, NOTIFICATION_EVENTS } = require('../services/notificationEngine');
 const LABEL_COLORS = ['red', 'orange', 'yellow', 'green', 'blue', 'purple'];
 
 const populateIssueQuery = (query) =>
@@ -10,6 +10,8 @@ const populateIssueQuery = (query) =>
     .populate('assignees', 'name email avatar')
     .populate('reporter', 'name email avatar')
     .populate('projectId', 'name key')
+    .populate('dependencies', 'title status priority')
+    .populate('checklist.assignee', 'name email avatar role')
     .populate('lifeline.assigned.assignee', 'name email avatar')
     .populate('lifeline.assigned.actor', 'name email avatar')
     .populate('lifeline.status.actor', 'name email avatar')
@@ -48,6 +50,36 @@ const normalizeIssueLabels = (labels) => {
     seen.add(key);
     return true;
   });
+};
+
+const normalizeChecklist = (checklist) => {
+  if (!Array.isArray(checklist)) return [];
+  return checklist
+    .map((item) => {
+      const text = String(item?.text || '').trim();
+      if (!text) return null;
+      const assignee = item?.assignee?._id ? item.assignee._id : item?.assignee;
+      return {
+        text,
+        completed: Boolean(item?.completed),
+        assignee: assignee || null,
+      };
+    })
+    .filter(Boolean);
+};
+
+const normalizeDependencyIds = (dependencyIds, issueIdToExclude) => {
+  if (!Array.isArray(dependencyIds)) return [];
+  const seen = new Set();
+  return dependencyIds
+    .map((dependencyId) => String(dependencyId?._id || dependencyId || '').trim())
+    .filter((dependencyId) => {
+      if (!dependencyId) return false;
+      if (issueIdToExclude && String(issueIdToExclude) === dependencyId) return false;
+      if (seen.has(dependencyId)) return false;
+      seen.add(dependencyId);
+      return true;
+    });
 };
 
 // @desc    Get all issues for a project
@@ -106,6 +138,9 @@ const createIssue = async (req, res) => {
       labels,
       dueDate,
       storyPoints,
+      riskLevel,
+      dependencies,
+      checklist,
     } = req.body;
 
     const project = await Project.findById(projectId);
@@ -130,6 +165,9 @@ const createIssue = async (req, res) => {
       assignee: normalizedAssignees.length > 0 ? normalizedAssignees[0] : null,
       assignees: normalizedAssignees,
       labels: normalizeIssueLabels(labels),
+      riskLevel,
+      dependencies: normalizeDependencyIds(dependencies, null),
+      checklist: normalizeChecklist(checklist),
       dueDate,
       storyPoints,
       reporter: req.user._id,
@@ -154,20 +192,11 @@ const createIssue = async (req, res) => {
 
     const createdIssue = await issue.save();
 
-    // Create notifications for all assignees
-    const uniqueAssignees = Array.from(new Set(normalizedAssignees.map(String)));
-    for (const aId of uniqueAssignees) {
-      if (String(aId) === String(req.user._id)) continue;
-      const notification = await Notification.create({
-        user: aId,
-        type: 'ISSUE_ASSIGNED',
-        message: `You have been assigned to a new issue: ${title}`,
-        link: `/project/${projectId}`,
-      });
-      try {
-        getIO().to(`user:${aId}`).emit('notification:new', { notification });
-      } catch (e) {}
-    }
+    // Notification engine: assignment + workload/role-aware alerts.
+    await processNotificationEvent(NOTIFICATION_EVENTS.TASK_ASSIGNED, {
+      actorId: req.user._id,
+      issueId: createdIssue._id,
+    });
 
     // Return populated issue for creator UI consistency
     const populated = await populateIssueQuery(Issue.findById(createdIssue._id));
@@ -223,27 +252,28 @@ const updateIssue = async (req, res) => {
       'checklist',
       'dueDate',
       'storyPoints',
+      'riskLevel',
+      'dependencies',
     ];
 
     const oldAssignees = normalizeIssueAssigneeIds(issue);
 
     let assigneeChanged = false;
     let statusChanged = false;
-    let newAssignee = null;
+    let hasMeaningfulUpdate = false;
     let oldStatus = issue.status;
 
     fieldsToUpdate.forEach((field) => {
       if (req.body[field] !== undefined) {
+        hasMeaningfulUpdate = true;
         if (field === 'assignee' && req.body[field] !== (issue.assignee ? issue.assignee.toString() : null)) {
            assigneeChanged = true;
-           newAssignee = req.body[field];
         }
         if (field === 'assignees' && Array.isArray(req.body[field])) {
           const next = req.body[field].filter(Boolean).map(String);
           const old = oldAssignees.map(String);
           if (next.join(',') !== old.join(',')) {
             assigneeChanged = true;
-            newAssignee = next[0] || null;
           }
         }
         if (field === 'status' && req.body[field] !== issue.status) {
@@ -251,6 +281,10 @@ const updateIssue = async (req, res) => {
         }
         if (field === 'labels') {
           issue[field] = normalizeIssueLabels(req.body[field]);
+        } else if (field === 'checklist') {
+          issue[field] = normalizeChecklist(req.body[field]);
+        } else if (field === 'dependencies') {
+          issue[field] = normalizeDependencyIds(req.body[field], issue._id);
         } else {
           issue[field] = req.body[field];
         }
@@ -309,44 +343,18 @@ const updateIssue = async (req, res) => {
 
     const updatedIssue = await issue.save();
     
-    // Notifications mapping
-    if (assigneeChanged && newAssignee && newAssignee.toString() !== req.user._id.toString()) {
-      const notification = await Notification.create({
-        user: newAssignee,
-        type: 'ISSUE_ASSIGNED',
-        message: `You have been assigned to the issue: ${updatedIssue.title}`,
-        link: `/project/${updatedIssue.projectId}`
+    if (assigneeChanged) {
+      await processNotificationEvent(NOTIFICATION_EVENTS.TASK_ASSIGNED, {
+        actorId: req.user._id,
+        issueId: updatedIssue._id,
       });
-      try {
-        getIO().to(`user:${newAssignee}`).emit('notification:new', { notification });
-      } catch (e) {}
     }
 
-    if (statusChanged) {
-      // Notify reporter if they didn't make the change
-      if (updatedIssue.reporter && updatedIssue.reporter.toString() !== req.user._id.toString()) {
-         const notification = await Notification.create({
-           user: updatedIssue.reporter,
-           type: 'STATUS_CHANGE',
-           message: `Status of your issue "${updatedIssue.title}" changed to ${updatedIssue.status}`,
-           link: `/project/${updatedIssue.projectId}`
-         });
-         try {
-           getIO().to(`user:${updatedIssue.reporter}`).emit('notification:new', { notification });
-         } catch (e) {}
-      }
-      // Notify assignee if they didn't make the change
-      if (updatedIssue.assignee && updatedIssue.assignee.toString() !== req.user._id.toString() && updatedIssue.assignee.toString() !== updatedIssue.reporter?.toString()) {
-         const notification = await Notification.create({
-           user: updatedIssue.assignee,
-           type: 'STATUS_CHANGE',
-           message: `Status of assigned issue "${updatedIssue.title}" changed to ${updatedIssue.status}`,
-           link: `/project/${updatedIssue.projectId}`
-         });
-         try {
-           getIO().to(`user:${updatedIssue.assignee}`).emit('notification:new', { notification });
-         } catch (e) {}
-      }
+    if (hasMeaningfulUpdate) {
+      await processNotificationEvent(NOTIFICATION_EVENTS.TASK_UPDATED, {
+        actorId: req.user._id,
+        issueId: updatedIssue._id,
+      });
     }
 
     // Return populated issue
@@ -516,10 +524,7 @@ const updateIssueChecklist = async (req, res) => {
       return res.status(400).json({ message: 'checklist must be an array' });
     }
 
-    const normalized = checklist.map((item) => ({
-      text: item?.text || '',
-      completed: Boolean(item?.completed),
-    }));
+    const normalized = normalizeChecklist(checklist);
 
     const issue = await Issue.findById(req.params.id);
     if (!issue) {

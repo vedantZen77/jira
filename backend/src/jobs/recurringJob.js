@@ -1,8 +1,8 @@
 const cron = require('node-cron');
 const Issue = require('../models/Issue');
-const Notification = require('../models/Notification');
 const RecurringSchedule = require('../models/RecurringSchedule');
 const { getIO } = require('../socket');
+const { processNotificationEvent, NOTIFICATION_EVENTS } = require('../services/notificationEngine');
 
 const cloneChecklist = (checklist) => {
   if (!Array.isArray(checklist)) return [];
@@ -132,26 +132,28 @@ function startRecurringJob() {
 
       for (const issue of populated) {
         await emitIssueToRooms(issue);
-
-        const assigneeId = issue.assignee?._id ? issue.assignee._id : issue.assignee;
-        const reporterId = issue.reporter?._id ? issue.reporter._id : issue.reporter;
-        if (assigneeId && reporterId && String(assigneeId) !== String(reporterId)) {
-          const notification = await Notification.create({
-            user: assigneeId,
-            type: 'ISSUE_ASSIGNED',
-            message: `You have been assigned to a new issue: ${issue.title}`,
-            link: `/project/${issue.projectId}`,
-          });
-          try {
-            getIO().to(`user:${assigneeId}`).emit('notification:new', { notification });
-          } catch (e) {}
-        }
+        await processNotificationEvent(NOTIFICATION_EVENTS.TASK_ASSIGNED, {
+          actorId: issue.reporter?._id || issue.reporter,
+          issueId: issue._id,
+        });
       }
 
       await RecurringSchedule.updateMany(
         { _id: { $in: dueScheduleIds } },
         { $set: { lastGeneratedAt: now } }
       );
+
+      // Overdue task scan: emit reliable persisted alerts once per day per task/user.
+      const overdueIssues = await Issue.find({
+        dueDate: { $lt: now },
+        status: { $ne: 'Done' },
+      }).select('_id');
+      for (const overdueIssue of overdueIssues) {
+        await processNotificationEvent(NOTIFICATION_EVENTS.TASK_OVERDUE, {
+          issueId: overdueIssue._id,
+          actorId: null,
+        });
+      }
     } catch (e) {
       console.error('Recurring job failed:', e);
     }

@@ -1,8 +1,8 @@
 const Template = require('../models/Template');
 const Project = require('../models/Project');
 const Issue = require('../models/Issue');
-const Notification = require('../models/Notification');
 const { getIO } = require('../socket');
+const { processNotificationEvent, NOTIFICATION_EVENTS } = require('../services/notificationEngine');
 
 const isLead = (project, userId) => {
   if (!project || !userId) return false;
@@ -417,20 +417,10 @@ const applyTemplateToProject = async (req, res) => {
 
     for (const issue of populated) {
       await emitIssueToRooms(issue);
-
-      const assigneeId = issue.assignee?._id ? issue.assignee._id : issue.assignee;
-      const reporterId = issue.reporter?._id ? issue.reporter._id : issue.reporter;
-      if (assigneeId && String(assigneeId) !== String(reporterId)) {
-        const notification = await Notification.create({
-          user: assigneeId,
-          type: 'ISSUE_ASSIGNED',
-          message: `You have been assigned to a new issue: ${issue.title}`,
-          link: `/project/${projectId}`,
-        });
-        try {
-          getIO().to(`user:${assigneeId}`).emit('notification:new', { notification });
-        } catch (e) {}
-      }
+      await processNotificationEvent(NOTIFICATION_EVENTS.TASK_ASSIGNED, {
+        actorId: req.user._id,
+        issueId: issue._id,
+      });
     }
 
     res.status(201).json(populated);

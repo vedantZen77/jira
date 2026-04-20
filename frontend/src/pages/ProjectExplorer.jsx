@@ -102,7 +102,7 @@ const ProjectExplorer = () => {
         }
     };
 
-    const isDev = ['admin', 'developer'].includes(user.role);
+    const isDev = ['admin', 'manager', 'developer', 'dev', 'artist'].includes(user.role);
 
     return (
         <div className="flex flex-col h-screen bg-white">

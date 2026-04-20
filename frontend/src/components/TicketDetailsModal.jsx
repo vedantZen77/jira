@@ -12,6 +12,7 @@ import {
   UserPlus,
   UserMinus,
   CircleDot,
+  Plus,
 } from 'lucide-react';
 
 const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
@@ -44,9 +45,18 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
   const iterationInputRef = useRef(null);
   const iterationListRef = useRef(null);
   const [newChecklistText, setNewChecklistText] = useState('');
+  const [newChecklistAssigneeId, setNewChecklistAssigneeId] = useState('');
   const [newLabelText, setNewLabelText] = useState('');
   const [newLabelColor, setNewLabelColor] = useState('blue');
   const [isLabelModalOpen, setIsLabelModalOpen] = useState(false);
+  const [projectIssueOptions, setProjectIssueOptions] = useState([]);
+  const [isDependencyModalOpen, setIsDependencyModalOpen] = useState(false);
+  const [dependencySearchText, setDependencySearchText] = useState('');
+  const [selectedDependencyId, setSelectedDependencyId] = useState('');
+  const [isSubtaskAssigneeModalOpen, setIsSubtaskAssigneeModalOpen] = useState(false);
+  const [subtaskAssigneeSearchText, setSubtaskAssigneeSearchText] = useState('');
+  const [selectedSubtaskAssigneeId, setSelectedSubtaskAssigneeId] = useState('');
+  const [activeSubtaskIndex, setActiveSubtaskIndex] = useState(null);
 
   const getUrgencyStyles = () => {
     const dueOverdue = issue?.dueDate && new Date(issue.dueDate).getTime() < Date.now() && issue.status !== 'Done';
@@ -181,6 +191,20 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
     }
   };
 
+  const getUserObject = (raw) => {
+    if (!raw) return null;
+    if (raw?._id) return raw;
+    return availableMembers.find((member) => String(member?._id || member) === String(raw)) || null;
+  };
+
+  const currentDependencyIds = Array.isArray(issue?.dependencies)
+    ? issue.dependencies.map((dependency) => String(dependency?._id || dependency))
+    : [];
+  const dependencyMap = new Map(projectIssueOptions.map((ticket) => [String(ticket._id), ticket]));
+  const currentDependencies = currentDependencyIds
+    .map((dependencyId) => dependencyMap.get(String(dependencyId)) || { _id: dependencyId, title: dependencyId })
+    .filter(Boolean);
+
   const handleAssigneesUpdate = async (nextIds) => {
     const normalized = Array.isArray(nextIds) ? nextIds.filter(Boolean).map(String) : [];
     const payload = {
@@ -268,6 +292,20 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
     loadTemplates();
   }, [issue?._id, project?._id]);
 
+  useEffect(() => {
+    const loadProjectIssues = async () => {
+      if (!project?._id) return;
+      try {
+        const { data } = await api.get(`/issues/project/${project._id}`);
+        const options = Array.isArray(data) ? data.filter((ticket) => String(ticket._id) !== String(issue?._id)) : [];
+        setProjectIssueOptions(options);
+      } catch (error) {
+        setProjectIssueOptions([]);
+      }
+    };
+    loadProjectIssues();
+  }, [project?._id, issue?._id]);
+
   // Close actions menu when clicking outside
   useEffect(() => {
     if (!actionsOpen) return;
@@ -337,6 +375,46 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
     }
   };
 
+  const handleRiskLevelChange = async (riskLevel) => {
+    try {
+      setLoading(true);
+      const { data } = await api.put(`/issues/${issue._id}`, { riskLevel });
+      onUpdate(data);
+      setEditedIssue((prev) => ({ ...prev, riskLevel: data.riskLevel }));
+    } catch (err) {
+      showToast('Failed to update risk level', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDependenciesChange = async (dependencyIds) => {
+    try {
+      setLoading(true);
+      const { data } = await api.put(`/issues/${issue._id}`, { dependencies: dependencyIds });
+      onUpdate(data);
+      setEditedIssue((prev) => ({ ...prev, dependencies: data.dependencies }));
+    } catch (err) {
+      showToast('Failed to update dependencies', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAddDependency = async () => {
+    if (!selectedDependencyId) return;
+    const next = Array.from(new Set([...currentDependencyIds, String(selectedDependencyId)]));
+    await handleDependenciesChange(next);
+    setSelectedDependencyId('');
+    setDependencySearchText('');
+    setIsDependencyModalOpen(false);
+  };
+
+  const handleRemoveDependency = async (dependencyId) => {
+    const next = currentDependencyIds.filter((id) => String(id) !== String(dependencyId));
+    await handleDependenciesChange(next);
+  };
+
   const handleChecklistToggle = async (index) => {
     if (!Array.isArray(issue?.checklist)) return;
     const source = editMode && Array.isArray(editedIssue?.checklist) ? editedIssue.checklist : issue.checklist;
@@ -363,18 +441,59 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
     const text = newChecklistText.trim();
     if (!text) return;
     const current = Array.isArray(issue?.checklist) ? issue.checklist : [];
-    const next = [...current, { text, completed: false }];
+    const next = [...current, { text, completed: false, assignee: newChecklistAssigneeId || user?._id || null }];
     try {
       setLoading(true);
       const { data } = await api.patch(`/issues/${issue._id}/checklist`, { checklist: next });
       onUpdate(data);
       setEditedIssue((prev) => ({ ...prev, checklist: data.checklist }));
       setNewChecklistText('');
+      setNewChecklistAssigneeId('');
     } catch (err) {
       showToast('Failed to add checklist item', 'error');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleChecklistAssigneeChange = async (index, assigneeId) => {
+    const current = Array.isArray(issue?.checklist) ? issue.checklist : [];
+    if (!current[index]) return;
+    const next = current.map((item, idx) => (
+      idx === index ? { ...item, assignee: assigneeId || null } : item
+    ));
+    try {
+      setLoading(true);
+      const { data } = await api.patch(`/issues/${issue._id}/checklist`, { checklist: next });
+      onUpdate(data);
+      setEditedIssue((prev) => ({ ...prev, checklist: data.checklist }));
+    } catch (err) {
+      showToast('Failed to update subtask assignee', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openSubtaskAssigneeModal = (index) => {
+    const current = Array.isArray(issue?.checklist) ? issue.checklist : [];
+    const currentAssigneeId = current[index]?.assignee?._id || current[index]?.assignee || '';
+    setActiveSubtaskIndex(index);
+    setSelectedSubtaskAssigneeId(String(currentAssigneeId || ''));
+    setSubtaskAssigneeSearchText('');
+    setIsSubtaskAssigneeModalOpen(true);
+  };
+
+  const closeSubtaskAssigneeModal = () => {
+    setIsSubtaskAssigneeModalOpen(false);
+    setSubtaskAssigneeSearchText('');
+    setSelectedSubtaskAssigneeId('');
+    setActiveSubtaskIndex(null);
+  };
+
+  const submitSubtaskAssigneeModal = async () => {
+    if (activeSubtaskIndex === null || activeSubtaskIndex === undefined) return;
+    await handleChecklistAssigneeChange(activeSubtaskIndex, selectedSubtaskAssigneeId || null);
+    closeSubtaskAssigneeModal();
   };
 
   const handleDeleteChecklistItem = async (index) => {
@@ -513,6 +632,30 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
                           >
                             {item?.text}
                           </span>
+                          <div className="min-w-[160px]">
+                            <div className="flex items-center gap-1.5">
+                              <div className="flex items-center bg-gray-50 text-gray-700 px-2 py-1 rounded-full text-[11px] font-medium border border-gray-200 max-w-[130px]">
+                                <span className="w-4 h-4 rounded-full bg-gray-300 flex items-center justify-center mr-1 text-white font-bold">
+                                  {getUserObject(item?.assignee)?.name?.charAt(0) || '?'}
+                                </span>
+                                <span className="truncate">
+                                  {getUserObject(item?.assignee)?.name || 'Unassigned'}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => openSubtaskAssigneeModal(idx)}
+                                disabled={loading || !canManageSubtasks}
+                                className="inline-flex items-center justify-center w-6 h-6 rounded-full text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100 transition disabled:opacity-50"
+                                title="Assign subtask"
+                              >
+                                <Plus size={12} />
+                              </button>
+                            </div>
+                            <div className="mt-1 text-[10px] text-gray-500 truncate">
+                              Working on: {getUserObject(item?.assignee)?.name || 'Nobody yet'}
+                            </div>
+                          </div>
                           {canManageSubtasks && (
                             <button
                               type="button"
@@ -843,6 +986,65 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
                 )}
               </div>
 
+              <div>
+                <label className="text-xs font-semibold text-gray-500 uppercase">Risk Level</label>
+                <div className="mt-1 rounded-xl border border-gray-200 bg-white p-2">
+                  <select
+                    className="h-10 w-full px-3 border border-gray-300 rounded-lg bg-gray-50 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    value={editedIssue.riskLevel || 'Low'}
+                    onChange={(e) => handleRiskLevelChange(e.target.value)}
+                    disabled={loading}
+                  >
+                    {['Low', 'Medium', 'High', 'Critical'].map((level) => (
+                      <option key={level} value={level}>{level}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-gray-500 uppercase">Dependencies</label>
+                <div className="mt-1 rounded-xl border border-gray-200 bg-white p-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {currentDependencies.length === 0 && (
+                      <span className="text-xs text-gray-400 italic">No dependencies</span>
+                    )}
+                    {currentDependencies.map((dependencyIssue) => (
+                      <div
+                        key={String(dependencyIssue._id)}
+                        className="flex items-center bg-gray-50 text-gray-700 px-2.5 py-1 rounded-full text-xs font-medium border border-gray-200"
+                        title={dependencyIssue.title}
+                      >
+                        <span className="max-w-[140px] truncate">
+                          {dependencyIssue.title}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveDependency(dependencyIssue._id)}
+                          className="ml-2 text-gray-400 hover:text-red-500 focus:outline-none"
+                          disabled={loading}
+                          title="Remove dependency"
+                        >
+                          &times;
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setIsDependencyModalOpen(true)}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition"
+                      disabled={loading}
+                    >
+                      <Plus size={12} />
+                      Add dependency
+                    </button>
+                  </div>
+                  <div className="mt-2 text-[11px] text-gray-400">
+                    Link tickets that this task depends on.
+                  </div>
+                </div>
+              </div>
+
               <div className="pt-4 border-t border-gray-200 mt-4">
                 <label className="text-xs font-semibold text-gray-500 uppercase">Labels</label>
                 <div className="mt-2 flex flex-wrap gap-2">
@@ -1045,6 +1247,135 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
                 className="px-3 py-2 rounded-lg font-semibold text-sm text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Save Label
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {isDependencyModalOpen && (
+        <div className="absolute inset-0 z-50 bg-black/30 backdrop-blur-[1px] flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-xl bg-white border border-gray-200 shadow-2xl p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-bold text-gray-800 uppercase tracking-wide">Add Dependency</h4>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsDependencyModalOpen(false);
+                  setDependencySearchText('');
+                  setSelectedDependencyId('');
+                }}
+                className="text-gray-400 hover:text-gray-700"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <input
+                type="text"
+                value={dependencySearchText}
+                onChange={(e) => setDependencySearchText(e.target.value)}
+                placeholder="Type to search ticket..."
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <select
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={selectedDependencyId}
+                onChange={(e) => setSelectedDependencyId(e.target.value)}
+              >
+                <option value="">Select dependency...</option>
+                {projectIssueOptions
+                  .filter((dependencyIssue) => !currentDependencyIds.includes(String(dependencyIssue._id)))
+                  .filter((dependencyIssue) => {
+                    const query = dependencySearchText.trim().toLowerCase();
+                    if (!query) return true;
+                    return String(dependencyIssue.title || '').toLowerCase().includes(query);
+                  })
+                  .map((dependencyIssue) => (
+                    <option key={dependencyIssue._id} value={dependencyIssue._id}>
+                      {dependencyIssue.title}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsDependencyModalOpen(false);
+                  setDependencySearchText('');
+                  setSelectedDependencyId('');
+                }}
+                className="px-3 py-2 rounded-lg font-semibold text-sm text-gray-600 bg-gray-100 hover:bg-gray-200"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleAddDependency}
+                disabled={loading || !selectedDependencyId}
+                className="px-3 py-2 rounded-lg font-semibold text-sm text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Add
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {isSubtaskAssigneeModalOpen && (
+        <div className="absolute inset-0 z-50 bg-black/30 backdrop-blur-[1px] flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-xl bg-white border border-gray-200 shadow-2xl p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-bold text-gray-800 uppercase tracking-wide">Assign Subtask</h4>
+              <button
+                type="button"
+                onClick={closeSubtaskAssigneeModal}
+                className="text-gray-400 hover:text-gray-700"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <input
+                type="text"
+                value={subtaskAssigneeSearchText}
+                onChange={(e) => setSubtaskAssigneeSearchText(e.target.value)}
+                placeholder="Type to search member..."
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <select
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={selectedSubtaskAssigneeId}
+                onChange={(e) => setSelectedSubtaskAssigneeId(e.target.value)}
+              >
+                <option value="">Unassigned</option>
+                {availableMembers
+                  .filter((member) => {
+                    const query = subtaskAssigneeSearchText.trim().toLowerCase();
+                    if (!query) return true;
+                    return String(member.name || '').toLowerCase().includes(query);
+                  })
+                  .map((member) => (
+                    <option key={String(member._id)} value={member._id}>
+                      {member.name}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeSubtaskAssigneeModal}
+                className="px-3 py-2 rounded-lg font-semibold text-sm text-gray-600 bg-gray-100 hover:bg-gray-200"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={submitSubtaskAssigneeModal}
+                disabled={loading || activeSubtaskIndex === null}
+                className="px-3 py-2 rounded-lg font-semibold text-sm text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Save
               </button>
             </div>
           </div>
