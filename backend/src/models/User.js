@@ -24,8 +24,8 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      // Keep legacy "developer" while supporting new "dev" and "artist" roles.
-      enum: ['admin', 'manager', 'developer', 'dev', 'artist', 'viewer'],
+      // Keep legacy roles while supporting both manager and pgm.
+      enum: ['admin', 'manager', 'pgm', 'developer', 'dev', 'artist', 'viewer'],
       default: 'dev',
     },
     avatar: {

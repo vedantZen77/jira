@@ -15,7 +15,14 @@ import {
   Plus,
 } from 'lucide-react';
 
-const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
+const TicketDetailsModal = ({
+  issue,
+  project,
+  onClose,
+  onUpdate,
+  initialTab = 'details',
+  initialLifelineTab = 'assigned',
+}) => {
   const LABEL_COLORS = [
     { id: 'red', className: 'bg-red-500' },
     { id: 'orange', className: 'bg-orange-500' },
@@ -26,11 +33,18 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
   ];
   const { user } = useContext(AuthContext);
   const { showToast } = useToast();
-  const [activeTab, setActiveTab] = useState('details');
-  const [lifelineTab, setLifelineTab] = useState('assigned');
+  const [activeTab, setActiveTab] = useState(initialTab);
+  const [lifelineTab, setLifelineTab] = useState(initialLifelineTab);
   const [editMode, setEditMode] = useState(false);
   const [editedIssue, setEditedIssue] = useState({ ...issue });
   const [newIteration, setNewIteration] = useState('');
+  const [mentionMenu, setMentionMenu] = useState({
+    open: false,
+    query: '',
+    start: -1,
+    end: -1,
+    activeIndex: 0,
+  });
   const [loading, setLoading] = useState(false);
 
   // Template integration (Add this ticket to a template)
@@ -529,6 +543,142 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
     }
   };
 
+  const mentionOptions = (() => {
+    const base = [{ id: 'everyone', label: 'everyone' }];
+    availableMembers.forEach((member) => {
+      const id = String(member?._id || '');
+      const label = String(member?.name || '').trim();
+      if (!id || !label) return;
+      base.push({ id, label });
+    });
+    const seen = new Set();
+    return base.filter((entry) => {
+      const key = String(entry.label || '').toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  })();
+
+  const getMentionContext = (text, caretIndex) => {
+    const safeText = String(text || '');
+    const safeCaret = Number.isFinite(caretIndex) ? caretIndex : safeText.length;
+    const beforeCaret = safeText.slice(0, safeCaret);
+    const match = beforeCaret.match(/(?:^|\s)@([^\s\[\]]*)$/);
+    if (!match) return null;
+    return {
+      query: String(match[1] || ''),
+      start: safeCaret - String(match[1] || '').length - 1,
+      end: safeCaret,
+    };
+  };
+
+  const getFilteredMentionOptions = (query) => {
+    const normalized = String(query || '').trim().toLowerCase();
+    if (!normalized) return mentionOptions;
+    return mentionOptions.filter((option) => option.label.toLowerCase().includes(normalized));
+  };
+
+  const updateMentionMenu = (textareaEl) => {
+    if (!textareaEl) return;
+    const context = getMentionContext(textareaEl.value, textareaEl.selectionStart);
+    if (!context) {
+      setMentionMenu((prev) => ({ ...prev, open: false }));
+      return;
+    }
+    const filtered = getFilteredMentionOptions(context.query);
+    if (filtered.length === 0) {
+      setMentionMenu((prev) => ({ ...prev, open: false }));
+      return;
+    }
+    setMentionMenu({
+      open: true,
+      query: context.query,
+      start: context.start,
+      end: context.end,
+      activeIndex: 0,
+    });
+  };
+
+  const applyMentionSelection = (option) => {
+    const activeOption = option || getFilteredMentionOptions(mentionMenu.query)[mentionMenu.activeIndex] || null;
+    if (!activeOption) return;
+    const safeStart = mentionMenu.start >= 0 ? mentionMenu.start : newIteration.length;
+    const safeEnd = mentionMenu.end >= 0 ? mentionMenu.end : newIteration.length;
+    const prefix = newIteration.slice(0, safeStart);
+    const suffix = newIteration.slice(safeEnd);
+    const inserted = `@[${activeOption.label}] `;
+    const nextValue = `${prefix}${inserted}${suffix}`;
+    const caretPos = prefix.length + inserted.length;
+
+    setNewIteration(nextValue);
+    setMentionMenu((prev) => ({ ...prev, open: false }));
+    setTimeout(() => {
+      if (!iterationInputRef.current) return;
+      iterationInputRef.current.focus();
+      iterationInputRef.current.setSelectionRange(caretPos, caretPos);
+    }, 0);
+  };
+
+  const normalizeMentionToken = (value) => String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const mentionRegex = /(@\[[^\]]+\]|@[a-zA-Z0-9._-]+)/g;
+  const currentUserMentionTokens = new Set(
+    [
+      normalizeMentionToken(user?.name),
+      normalizeMentionToken(String(user?.name || '').replace(/\s+/g, '')),
+      normalizeMentionToken(String(user?.email || '').split('@')[0]),
+    ].filter(Boolean)
+  );
+
+  const getMentionTokenValue = (mentionText) => {
+    const raw = mentionText.startsWith('@[') && mentionText.endsWith(']')
+      ? mentionText.slice(2, -1)
+      : mentionText.slice(1);
+    return normalizeMentionToken(raw);
+  };
+
+  const renderIterationContent = (content, isOwnMessage) => {
+    const text = String(content || '');
+    if (!text) return null;
+
+    const nodes = [];
+    let lastIndex = 0;
+    let index = 0;
+    for (const match of text.matchAll(mentionRegex)) {
+      const mentionText = match[0];
+      const start = match.index || 0;
+      const end = start + mentionText.length;
+
+      if (start > lastIndex) {
+        nodes.push(<span key={`text-${index++}`}>{text.slice(lastIndex, start)}</span>);
+      }
+
+      const tokenValue = getMentionTokenValue(mentionText);
+      const isEveryone = tokenValue === 'everyone';
+      const isTaggedToMe = isEveryone || currentUserMentionTokens.has(tokenValue);
+      const mentionClass = isTaggedToMe
+        ? isOwnMessage
+          ? 'bg-white/20 text-white ring-1 ring-white/40'
+          : 'bg-amber-100 text-amber-800 ring-1 ring-amber-200'
+        : isOwnMessage
+          ? 'bg-white/15 text-white'
+          : 'bg-blue-50 text-blue-700';
+
+      nodes.push(
+        <span key={`mention-${index++}`} className={`inline-block px-1.5 py-0.5 rounded font-semibold ${mentionClass}`}>
+          {mentionText}
+        </span>
+      );
+      lastIndex = end;
+    }
+
+    if (lastIndex < text.length) {
+      nodes.push(<span key={`text-${index++}`}>{text.slice(lastIndex)}</span>);
+    }
+
+    return nodes;
+  };
+
   return (
     <div className="fixed inset-0 bg-gray-900 bg-opacity-60 overflow-y-auto h-full w-full z-50 flex justify-center items-center backdrop-blur-sm p-4">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden relative">
@@ -804,10 +954,12 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
                       {lifelineIterations.length === 0 ? (
                         <div className="text-center py-8 text-gray-500">No iteration updates yet.</div>
                       ) : (
-                        lifelineIterations.map((entry, idx) => (
+                        lifelineIterations.map((entry, idx) => {
+                          const isOwnMessage = String(entry.author?._id || '') === String(user?._id || '');
+                          return (
                           <div
                             key={`${entry._id || idx}-iteration`}
-                            className={`flex ${String(entry.author?._id || '') === String(user?._id || '') ? 'justify-end' : 'justify-start'}`}
+                            className={`flex ${isOwnMessage ? 'justify-end' : 'justify-start'}`}
                           >
                             <div className="max-w-[85%]">
                               <div className="flex items-center gap-2 mb-1">
@@ -819,16 +971,17 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
                               </div>
                               <div
                                 className={`rounded-2xl border px-3 py-2 text-sm whitespace-pre-wrap break-words ${
-                                  String(entry.author?._id || '') === String(user?._id || '')
+                                  isOwnMessage
                                     ? 'bg-blue-600 text-white border-blue-600'
                                     : 'bg-white text-gray-800 border-gray-200'
                                 }`}
                               >
-                                {entry.content}
+                                {renderIterationContent(entry.content, isOwnMessage)}
                               </div>
                             </div>
                           </div>
-                        ))
+                          );
+                        })
                       )}
                     </>
                   )}
@@ -842,17 +995,81 @@ const TicketDetailsModal = ({ issue, project, onClose, onUpdate }) => {
                         ref={iterationInputRef}
                         rows={1}
                         className="w-full px-3 py-2 bg-transparent text-sm resize-none max-h-32 min-h-[40px] focus:outline-none"
-                        placeholder="Write an iteration update..."
+                        placeholder="Write an iteration update... (use @[name] or @everyone)"
                         value={newIteration}
-                        onChange={(e) => setNewIteration(e.target.value)}
+                        onChange={(e) => {
+                          setNewIteration(e.target.value);
+                          updateMentionMenu(e.target);
+                        }}
+                        onClick={(e) => updateMentionMenu(e.target)}
+                        onKeyUp={(e) => updateMentionMenu(e.target)}
                         onKeyDown={(e) => {
+                          if (mentionMenu.open) {
+                            const filtered = getFilteredMentionOptions(mentionMenu.query);
+                            if (e.key === 'ArrowDown') {
+                              e.preventDefault();
+                              setMentionMenu((prev) => ({
+                                ...prev,
+                                activeIndex: filtered.length === 0
+                                  ? 0
+                                  : Math.min(prev.activeIndex + 1, filtered.length - 1),
+                              }));
+                              return;
+                            }
+                            if (e.key === 'ArrowUp') {
+                              e.preventDefault();
+                              setMentionMenu((prev) => ({
+                                ...prev,
+                                activeIndex: filtered.length === 0
+                                  ? 0
+                                  : Math.max(prev.activeIndex - 1, 0),
+                              }));
+                              return;
+                            }
+                            if (e.key === 'Enter' || e.key === 'Tab') {
+                              e.preventDefault();
+                              applyMentionSelection(filtered[mentionMenu.activeIndex]);
+                              return;
+                            }
+                            if (e.key === 'Escape') {
+                              e.preventDefault();
+                              setMentionMenu((prev) => ({ ...prev, open: false }));
+                              return;
+                            }
+                          }
                           if (e.key === 'Enter' && !e.shiftKey) {
                             e.preventDefault();
                             if (!loading && newIteration.trim()) handleAddIteration(e);
                           }
                         }}
+                        onBlur={() => {
+                          setTimeout(() => {
+                            setMentionMenu((prev) => ({ ...prev, open: false }));
+                          }, 120);
+                        }}
                         disabled={loading}
                       />
+                      {mentionMenu.open && (
+                        <div className="mt-2 border border-gray-200 rounded-lg bg-white shadow-lg max-h-44 overflow-y-auto">
+                          {getFilteredMentionOptions(mentionMenu.query).map((option, idx) => (
+                            <button
+                              key={`${option.id}-${option.label}`}
+                              type="button"
+                              className={`w-full text-left px-3 py-2 text-sm transition ${
+                                idx === mentionMenu.activeIndex
+                                  ? 'bg-blue-50 text-blue-700'
+                                  : 'text-gray-700 hover:bg-gray-50'
+                              }`}
+                              onMouseDown={(event) => {
+                                event.preventDefault();
+                                applyMentionSelection(option);
+                              }}
+                            >
+                              @{option.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                     <button
                       type="submit"

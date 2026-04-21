@@ -18,6 +18,7 @@ const notificationSchema = mongoose.Schema({
       'TASK_ASSIGNED',
       'TASK_UPDATED',
       'COMMENT_ADDED',
+      'ITERATION_ADDED',
       'TASK_OVERDUE',
       'WORKLOAD_ALERT',
       'ROLE_ALERT',

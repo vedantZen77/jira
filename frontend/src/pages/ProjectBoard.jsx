@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useContext } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import Layout from '../components/Layout';
 import api from '../utils/api';
 import { AuthContext } from '../context/AuthContext';
@@ -83,6 +83,30 @@ const getIssueAssigneeList = (issue) => {
   return list.filter(Boolean);
 };
 
+const getDependencyMeta = (issue) => {
+  const dependencyList = Array.isArray(issue?.dependencies) ? issue.dependencies : [];
+  const unresolved = dependencyList.filter((dep) => {
+    const status = String(dep?.status || '').toLowerCase();
+    // Treat unknown dependency status as pending to keep blockers visible.
+    if (!status) return true;
+    return status !== 'done';
+  });
+  return {
+    total: dependencyList.length,
+    blocked: unresolved.length,
+    isBlocked: unresolved.length > 0,
+  };
+};
+
+const formatRoleLabel = (role) => {
+  const normalized = String(role || '').toLowerCase();
+  if (!normalized) return 'N/A';
+  if (normalized === 'manager') return 'MANAGER';
+  if (normalized === 'pgm') return 'PGM';
+  if (normalized === 'dev' || normalized === 'developer') return 'DEV';
+  return normalized.toUpperCase();
+};
+
 const ChecklistProgressBar = ({ issue }) => {
   const checklist = Array.isArray(issue?.checklist) ? issue.checklist : [];
   const total = checklist.length;
@@ -107,6 +131,7 @@ const ChecklistProgressBar = ({ issue }) => {
 
 const ProjectBoard = () => {
   const { id } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useContext(AuthContext);
   const { showToast } = useToast();
   
@@ -143,6 +168,23 @@ const ProjectBoard = () => {
   const [newLabelColor, setNewLabelColor] = useState('blue');
   const [draggingIssueId, setDraggingIssueId] = useState(null);
   const [creatingIssue, setCreatingIssue] = useState(false);
+  const ticketIdFromQuery = searchParams.get('ticket');
+  const initialTab = searchParams.get('tab') || 'details';
+  const initialLifelineTab = searchParams.get('lifelineTab') || 'assigned';
+
+  const updateTicketSearchParams = (ticketId, overrides = {}) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (ticketId) next.set('ticket', String(ticketId));
+      else next.delete('ticket');
+
+      Object.entries(overrides).forEach(([key, value]) => {
+        if (value === null || value === undefined || value === '') next.delete(key);
+        else next.set(key, String(value));
+      });
+      return next;
+    });
+  };
 
   // Fetch logic
   const fetchProjectData = async () => {
@@ -172,6 +214,14 @@ const ProjectBoard = () => {
   }, [id]);
 
   useEffect(() => {
+    if (!ticketIdFromQuery || !Array.isArray(issues) || issues.length === 0) return;
+    const matched = issues.find((issue) => String(issue._id) === String(ticketIdFromQuery));
+    if (matched) {
+      setSelectedIssue((prev) => (String(prev?._id || '') === String(matched._id) ? prev : matched));
+    }
+  }, [issues, ticketIdFromQuery]);
+
+  useEffect(() => {
     if (!id) return;
     const s = connectSocket();
     joinProjectRoom(id);
@@ -193,7 +243,13 @@ const ProjectBoard = () => {
     const onIssueDeleted = ({ issueId }) => {
       if (!issueId) return;
       setIssues((prev) => prev.filter((i) => i._id !== issueId));
-      setSelectedIssue((prev) => (prev?._id === issueId ? null : prev));
+      setSelectedIssue((prev) => {
+        const shouldClear = prev?._id === issueId;
+        if (shouldClear && String(ticketIdFromQuery || '') === String(issueId)) {
+          updateTicketSearchParams(null, { tab: null, lifelineTab: null });
+        }
+        return shouldClear ? null : prev;
+      });
     };
 
     s.on('issue:updated', onIssueUpdated);
@@ -212,7 +268,7 @@ const ProjectBoard = () => {
       s.off('board:presence', onBoardPresence);
       leaveProjectRoom(id);
     };
-  }, [id]);
+  }, [id, ticketIdFromQuery]);
 
   const isLead = () => {
     if (!project || !user?._id) return false;
@@ -727,12 +783,23 @@ const ProjectBoard = () => {
 
                         <div className="flex flex-col gap-3 overflow-y-auto pr-1 pb-2 flex-1 min-h-0 scrollbar-hide">
                           {columnIssues.map((issue) => (
+                            (() => {
+                              const dependencyMeta = getDependencyMeta(issue);
+                              return (
                             <div 
                               key={issue._id}
                               draggable
                               onDragStart={() => handleDragStart(issue._id)}
-                              className={`bg-white p-3 rounded-xl shadow-sm border border-gray-200 border-l-4 ${getCardAccent(issue)} hover:shadow-md cursor-pointer transition flex flex-col group relative`}
-                              onClick={() => setSelectedIssue(issue)}
+                              className={`bg-white p-3 rounded-xl shadow-sm border border-gray-200 border-l-4 ${getCardAccent(issue)} hover:shadow-md cursor-pointer transition flex flex-col group relative ${
+                                dependencyMeta.isBlocked
+                                  ? 'bg-gray-300 border-gray-400 text-gray-500 opacity-60 grayscale shadow-none hover:shadow-none'
+                                  : ''
+                              }`}
+                              title={dependencyMeta.isBlocked ? 'Blocked by dependency' : undefined}
+                              onClick={() => {
+                                setSelectedIssue(issue);
+                                updateTicketSearchParams(issue._id);
+                              }}
                             >
                               <div className="text-xs font-semibold text-gray-500 tracking-wide mb-1 flex items-center justify-between">
                                 {project.key}-{issue._id.slice(-4).toUpperCase()}
@@ -799,6 +866,8 @@ const ProjectBoard = () => {
                                 </div>
                               </div>
                             </div>
+                              );
+                            })()
                           ))}
                           
                           {columnIssues.length === 0 && (
@@ -1044,7 +1113,7 @@ const ProjectBoard = () => {
                               <div className="flex items-center justify-between gap-2">
                                 <span className="font-semibold text-sm text-gray-800 truncate">{u.name}</span>
                                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 border border-gray-200 uppercase">
-                                  {u.role}
+                                  {formatRoleLabel(u.role)}
                                 </span>
                               </div>
                               <div className="text-xs text-gray-500 truncate">{u.email}</div>
@@ -1238,7 +1307,12 @@ const ProjectBoard = () => {
         <TicketDetailsModal
           issue={selectedIssue}
           project={project}
-          onClose={() => setSelectedIssue(null)}
+          initialTab={initialTab}
+          initialLifelineTab={initialLifelineTab}
+          onClose={() => {
+            setSelectedIssue(null);
+            updateTicketSearchParams(null, { tab: null, lifelineTab: null });
+          }}
           onUpdate={(updatedIssue) => {
             setIssues(issues.map(i => i._id === updatedIssue._id ? updatedIssue : i));
             setSelectedIssue(updatedIssue);

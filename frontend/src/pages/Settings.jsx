@@ -16,6 +16,14 @@ const Settings = () => {
   const [pwSaving, setPwSaving] = useState(false);
   const [pwMessage, setPwMessage] = useState('');
   const [pwError, setPwError] = useState('');
+  const roleDisplay = (value) => {
+    const normalized = String(value || '').toLowerCase();
+    if (normalized === 'manager') return 'Manager';
+    if (normalized === 'pgm') return 'PGM';
+    if (normalized === 'dev' || normalized === 'developer') return 'Dev';
+    if (!normalized) return 'Developer';
+    return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+  };
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -70,7 +78,7 @@ const Settings = () => {
             <div>
               <h3 className="text-2xl font-bold text-gray-800">{user?.name}</h3>
               <p className="text-gray-500 font-medium flex items-center mt-1">
-                <Shield size={16} className="mr-1.5" /> Role: {user?.role || 'Developer'}
+                <Shield size={16} className="mr-1.5" /> Role: {roleDisplay(user?.role)}
               </p>
             </div>
           </div>
@@ -114,6 +122,7 @@ const Settings = () => {
                   onChange={(e) => setRole(e.target.value)}
                 >
                   <option value="manager">Manager</option>
+                  <option value="pgm">PGM</option>
                   <option value="dev">Dev</option>
                   <option value="artist">Artist</option>
                   <option value="viewer">Viewer</option>

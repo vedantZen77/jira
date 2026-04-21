@@ -17,6 +17,14 @@ const Sidebar = () => {
   const { logout, user } = useContext(AuthContext);
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
+  const roleDisplay = (value) => {
+    const normalized = String(value || '').toLowerCase();
+    if (normalized === 'manager') return 'MANAGER';
+    if (normalized === 'pgm') return 'PGM';
+    if (normalized === 'dev' || normalized === 'developer') return 'DEV';
+    if (!normalized) return 'USER';
+    return normalized.toUpperCase();
+  };
 
   const handleLogout = () => {
     logout();
@@ -76,7 +84,7 @@ const Sidebar = () => {
             </div>
             <div className="mx-2">
               <h4 className="mx-2 font-medium text-white">{user?.name}</h4>
-              <p className="mx-2 mt-1 text-xs text-gray-400 font-medium">{user?.role}</p>
+              <p className="mx-2 mt-1 text-xs text-gray-400 font-medium">{roleDisplay(user?.role)}</p>
             </div>
           </div>
 

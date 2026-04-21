@@ -8,6 +8,24 @@ const ACTIVE_STATUSES = ['Backlog', 'Todo', 'In Progress', 'In Review', 'Testing
 const WORKLOAD_ALERT_THRESHOLD = Number(process.env.WORKLOAD_ALERT_THRESHOLD || 8);
 
 const uniqueIds = (ids) => Array.from(new Set((ids || []).filter(Boolean).map((value) => String(value))));
+const normalizeMentionToken = (value) => String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+const buildIssueLink = (projectId, issueId, defaults = {}) => {
+  const normalizedProjectId = String(projectId || '');
+  const normalizedIssueId = String(issueId || '');
+  const params = new URLSearchParams();
+
+  if (normalizedIssueId) {
+    params.set('ticket', normalizedIssueId);
+  }
+  Object.entries(defaults).forEach(([key, value]) => {
+    if (value === null || value === undefined || value === '') return;
+    params.set(key, String(value));
+  });
+
+  const query = params.toString();
+  return query ? `/project/${normalizedProjectId}?${query}` : `/project/${normalizedProjectId}`;
+};
 
 const getIssueAssigneeIds = (issue) => {
   const assignees = Array.isArray(issue?.assignees) && issue.assignees.length > 0
@@ -20,8 +38,15 @@ const getIssueAssigneeIds = (issue) => {
 
 const parseMentionNames = (content) => {
   if (!content) return [];
-  const matches = String(content).match(/@([a-zA-Z0-9._-]+)/g) || [];
-  return uniqueIds(matches.map((token) => token.slice(1).toLowerCase()));
+  const tokens = [];
+  const mentionPattern = /@\[([^\]]+)\]|@\{([^}]+)\}|@([a-zA-Z0-9._-]+)/g;
+  let match;
+  while ((match = mentionPattern.exec(String(content))) !== null) {
+    const rawToken = match[1] || match[2] || match[3];
+    const normalized = normalizeMentionToken(rawToken);
+    if (normalized) tokens.push(normalized);
+  }
+  return uniqueIds(tokens);
 };
 
 const resolveMentionedUserIds = async (project, content) => {
@@ -34,12 +59,29 @@ const resolveMentionedUserIds = async (project, content) => {
     ...(project?.members || []).map((member) => member?._id || member),
   ]);
   if (candidateIds.length === 0) return [];
+  const includesEveryone = mentionNames.includes('everyone');
 
-  const users = await User.find({ _id: { $in: candidateIds } }, 'name').lean();
+  const users = await User.find({ _id: { $in: candidateIds } }, 'name email').lean();
   return uniqueIds(
     users
-      .filter((user) => mentionNames.includes(String(user.name || '').toLowerCase()))
+      .filter((user) => {
+        if (includesEveryone) return true;
+        const normalizedName = normalizeMentionToken(user.name);
+        const normalizedCompactName = normalizeMentionToken(String(user.name || '').replace(/\s+/g, ''));
+        const normalizedEmailAlias = normalizeMentionToken(String(user.email || '').split('@')[0]);
+        return mentionNames.includes(normalizedName)
+          || mentionNames.includes(normalizedCompactName)
+          || mentionNames.includes(normalizedEmailAlias);
+      })
       .map((user) => user._id)
+  );
+};
+
+const getIterationAuthorIds = (issue) => {
+  if (!Array.isArray(issue?.lifeline?.iterations)) return [];
+  return uniqueIds(
+    issue.lifeline.iterations
+      .map((entry) => entry?.author?._id || entry?.author)
   );
 };
 
@@ -57,7 +99,7 @@ const getProjectManagerIds = async (projectId) => {
   const users = await User.find({ _id: { $in: candidateIds } }, 'role').lean();
   return uniqueIds(
     users
-      .filter((user) => ['admin', 'manager'].includes(String(user.role || '').toLowerCase()))
+      .filter((user) => ['admin', 'manager', 'pgm'].includes(String(user.role || '').toLowerCase()))
       .map((user) => user._id)
   );
 };
@@ -140,7 +182,7 @@ const processNotificationEvent = async (eventType, payload = {}) => {
     type = 'TASK_ASSIGNED';
   } else if (eventType === NOTIFICATION_EVENTS.TASK_UPDATED) {
     recipients = uniqueIds([reporterId, ...assigneeIds, ...watcherIds]);
-    message = `Task updated: ${issue.title}`;
+    message = payload.updateSummary || `Task updated: ${issue.title}`;
     type = 'TASK_UPDATED';
   } else if (eventType === NOTIFICATION_EVENTS.COMMENT_ADDED) {
     recipients = uniqueIds([reporterId, ...assigneeIds, ...watcherIds]);
@@ -155,13 +197,39 @@ const processNotificationEvent = async (eventType, payload = {}) => {
         type: 'MENTION',
         priority,
         message: `You were mentioned on task: ${issue.title}`,
-        link: `/project/${projectId}`,
+        link: buildIssueLink(projectId, issue._id, { tab: 'lifeline', lifelineTab: 'iteration' }),
         metadata: {
           taskId: issue._id,
           projectId,
           commentId: payload.commentId,
           actorId,
         },
+      });
+    }
+  } else if (eventType === NOTIFICATION_EVENTS.ITERATION_ADDED) {
+    const iterationAuthorIds = getIterationAuthorIds(issue);
+    recipients = uniqueIds([reporterId, ...assigneeIds, ...watcherIds, ...iterationAuthorIds]);
+    message = payload.actorName
+      ? `${payload.actorName} posted an iteration update: ${issue.title}`
+      : `New iteration update on task: ${issue.title}`;
+    type = 'ITERATION_ADDED';
+
+    const mentionedUserIds = await resolveMentionedUserIds(project, payload.iterationContent || '');
+    for (const mentionedUserId of mentionedUserIds) {
+      if (String(mentionedUserId) === actorId) continue;
+      await createAndDispatchNotification({
+        userId: mentionedUserId,
+        type: 'MENTION',
+        priority,
+        message: `You were mentioned in ticket chat: ${issue.title}`,
+        link: buildIssueLink(projectId, issue._id, { tab: 'lifeline', lifelineTab: 'iteration' }),
+        metadata: {
+          taskId: issue._id,
+          projectId,
+          actorId,
+          dedupeKey: `iteration-mention:${issue._id}:${mentionedUserId}:${payload.iterationId || ''}`,
+        },
+        dedupeWindowMs: 5 * 60 * 1000,
       });
     }
   } else if (eventType === NOTIFICATION_EVENTS.TASK_OVERDUE) {
@@ -184,7 +252,13 @@ const processNotificationEvent = async (eventType, payload = {}) => {
       type,
       priority,
       message,
-      link: `/project/${projectId}`,
+      link: buildIssueLink(
+        projectId,
+        issue._id,
+        type === 'COMMENT_ADDED' || type === 'ITERATION_ADDED'
+          ? { tab: 'lifeline', lifelineTab: 'iteration' }
+          : {}
+      ),
       metadata: {
         taskId: issue._id,
         projectId,
@@ -192,9 +266,11 @@ const processNotificationEvent = async (eventType, payload = {}) => {
         actorId,
         dedupeKey: isOverdueAlert
           ? `overdue:${issue._id}:${recipientId}:${new Date().toISOString().slice(0, 10)}`
+          : type === 'ITERATION_ADDED'
+            ? `iteration:${issue._id}:${recipientId}:${payload.iterationId || ''}`
           : null,
       },
-      dedupeWindowMs: isOverdueAlert ? 24 * 60 * 60 * 1000 : 0,
+      dedupeWindowMs: isOverdueAlert ? 24 * 60 * 60 * 1000 : type === 'ITERATION_ADDED' ? 2 * 60 * 1000 : 0,
     });
   }
 

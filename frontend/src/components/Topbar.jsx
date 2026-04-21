@@ -180,6 +180,7 @@ const Topbar = ({ title }) => {
         return { icon: Activity, dot: 'bg-red-500', text: 'text-red-700', label: 'Alert' };
       case 'COMMENT_ADDED':
       case 'MENTION':
+      case 'ITERATION_ADDED':
         return { icon: Activity, dot: 'bg-emerald-500', text: 'text-emerald-700', label: 'Comment' };
       default:
         return { icon: Activity, dot: 'bg-gray-500', text: 'text-gray-700', label: 'Update' };

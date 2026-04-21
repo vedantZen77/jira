@@ -82,6 +82,34 @@ const normalizeDependencyIds = (dependencyIds, issueIdToExclude) => {
     });
 };
 
+const buildDependencyUpdateSummary = (issueTitle, addedIds = [], removedIds = [], titleById = new Map()) => {
+  const addedCount = addedIds.length;
+  const removedCount = removedIds.length;
+  if (addedCount === 0 && removedCount === 0) return null;
+
+  const formatTitles = (ids) => {
+    const titles = ids
+      .map((id) => titleById.get(String(id)))
+      .filter(Boolean)
+      .slice(0, 2);
+    if (titles.length === 0) return null;
+    return titles.join(', ');
+  };
+
+  const summaryParts = [];
+  if (addedCount > 0) summaryParts.push(`+${addedCount}`);
+  if (removedCount > 0) summaryParts.push(`-${removedCount}`);
+
+  const detailParts = [];
+  const addedTitles = formatTitles(addedIds);
+  const removedTitles = formatTitles(removedIds);
+  if (addedTitles) detailParts.push(`added: ${addedTitles}`);
+  if (removedTitles) detailParts.push(`removed: ${removedTitles}`);
+
+  const details = detailParts.length > 0 ? ` (${detailParts.join(' | ')})` : '';
+  return `Dependencies updated (${summaryParts.join(', ')}) on task: ${issueTitle}${details}`;
+};
+
 // @desc    Get all issues for a project
 // @route   GET /api/issues/project/:projectId
 // @access  Private
@@ -257,11 +285,13 @@ const updateIssue = async (req, res) => {
     ];
 
     const oldAssignees = normalizeIssueAssigneeIds(issue);
+    const oldDependencyIds = normalizeDependencyIds(issue.dependencies, issue._id);
 
     let assigneeChanged = false;
     let statusChanged = false;
     let hasMeaningfulUpdate = false;
     let oldStatus = issue.status;
+    let dependencyChange = { addedIds: [], removedIds: [] };
 
     fieldsToUpdate.forEach((field) => {
       if (req.body[field] !== undefined) {
@@ -284,7 +314,13 @@ const updateIssue = async (req, res) => {
         } else if (field === 'checklist') {
           issue[field] = normalizeChecklist(req.body[field]);
         } else if (field === 'dependencies') {
-          issue[field] = normalizeDependencyIds(req.body[field], issue._id);
+          const nextDependencyIds = normalizeDependencyIds(req.body[field], issue._id);
+          const oldSet = new Set(oldDependencyIds.map(String));
+          const nextSet = new Set(nextDependencyIds.map(String));
+          const addedIds = nextDependencyIds.filter((id) => !oldSet.has(String(id)));
+          const removedIds = oldDependencyIds.filter((id) => !nextSet.has(String(id)));
+          dependencyChange = { addedIds, removedIds };
+          issue[field] = nextDependencyIds;
         } else {
           issue[field] = req.body[field];
         }
@@ -351,9 +387,29 @@ const updateIssue = async (req, res) => {
     }
 
     if (hasMeaningfulUpdate) {
+      const changedDependencyIds = Array.from(new Set([
+        ...(dependencyChange.addedIds || []).map(String),
+        ...(dependencyChange.removedIds || []).map(String),
+      ]));
+      const dependencyTitleById = new Map();
+      if (changedDependencyIds.length > 0) {
+        const changedDependencyIssues = await Issue.find({ _id: { $in: changedDependencyIds } })
+          .select('title')
+          .lean();
+        changedDependencyIssues.forEach((dependencyIssue) => {
+          dependencyTitleById.set(String(dependencyIssue._id), dependencyIssue.title);
+        });
+      }
+
       await processNotificationEvent(NOTIFICATION_EVENTS.TASK_UPDATED, {
         actorId: req.user._id,
         issueId: updatedIssue._id,
+        updateSummary: buildDependencyUpdateSummary(
+          updatedIssue.title,
+          dependencyChange.addedIds || [],
+          dependencyChange.removedIds || [],
+          dependencyTitleById
+        ),
       });
     }
 
@@ -591,11 +647,38 @@ const addIssueIteration = async (req, res) => {
       createdAt: new Date(),
     });
     await issue.save();
+    const createdIteration = issue.lifeline.iterations[issue.lifeline.iterations.length - 1];
+
+    await processNotificationEvent(NOTIFICATION_EVENTS.ITERATION_ADDED, {
+      actorId: req.user._id,
+      actorName: req.user?.name,
+      issueId: issue._id,
+      iterationId: createdIteration?._id,
+      iterationContent: content,
+    });
 
     const populatedIssue = await populateIssueQuery(Issue.findById(issue._id));
     try {
       const projectId = populatedIssue.projectId?._id ? populatedIssue.projectId._id : populatedIssue.projectId;
       getIO().to(`project:${projectId}`).emit('issue:updated', { issue: populatedIssue });
+
+      const reporterId = populatedIssue.reporter?._id ? populatedIssue.reporter._id : populatedIssue.reporter;
+      const assigneeIds = Array.isArray(populatedIssue.assignees) && populatedIssue.assignees.length > 0
+        ? populatedIssue.assignees.map((a) => (a?._id ? a._id : a))
+        : (populatedIssue.assignee ? [populatedIssue.assignee?._id ? populatedIssue.assignee._id : populatedIssue.assignee] : []);
+
+      const projectParticipants = await Project.findById(projectId).select('createdBy leads members').lean();
+      const participantIds = new Set([
+        reporterId ? String(reporterId) : null,
+        ...assigneeIds.map((value) => (value ? String(value) : null)),
+        projectParticipants?.createdBy ? String(projectParticipants.createdBy) : null,
+        ...(Array.isArray(projectParticipants?.leads) ? projectParticipants.leads.map((value) => String(value)) : []),
+        ...(Array.isArray(projectParticipants?.members) ? projectParticipants.members.map((value) => String(value)) : []),
+      ].filter(Boolean));
+
+      participantIds.forEach((participantId) => {
+        getIO().to(`user:${participantId}`).emit('issue:updated', { issue: populatedIssue });
+      });
     } catch (e) {}
 
     res.status(201).json(populatedIssue);
