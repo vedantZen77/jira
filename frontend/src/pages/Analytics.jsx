@@ -17,6 +17,7 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Le
 
 const Analytics = () => {
   const { user } = useContext(AuthContext);
+  const canViewAnalytics = ['admin', 'manager', 'pgm'].includes(String(user?.role || '').toLowerCase());
   const [summary, setSummary] = useState({ total: 0, open: 0, done: 0, overdue: 0 });
   const [tasksPerDay, setTasksPerDay] = useState([]);
   const [status, setStatus] = useState([]);
@@ -42,8 +43,8 @@ const Analytics = () => {
       }
     };
 
-    if (user) loadProjects();
-  }, [user]);
+    if (user && canViewAnalytics) loadProjects();
+  }, [user, canViewAnalytics]);
 
   useEffect(() => {
     const load = async () => {
@@ -73,8 +74,8 @@ const Analytics = () => {
         setLoading(false);
       }
     };
-    if (user) load();
-  }, [user, selectedProjectId, stateFilter, selectedDevId]);
+    if (user && canViewAnalytics) load();
+  }, [user, selectedProjectId, stateFilter, selectedDevId, canViewAnalytics]);
 
   const tasksPerDayChart = useMemo(() => {
     const labels = tasksPerDay.map((x) => new Date(x.date).toLocaleDateString());
@@ -126,6 +127,14 @@ const Analytics = () => {
 
   return (
     <Layout title="Analytics">
+      {!canViewAnalytics ? (
+        <div className="max-w-3xl bg-white rounded-xl border border-gray-200 p-6">
+          <h2 className="text-xl font-bold text-gray-900">Analytics access restricted</h2>
+          <p className="text-sm text-gray-500 mt-2">
+            Only Manager, PGM, or Admin roles can access organization-wide analytics.
+          </p>
+        </div>
+      ) : (
       <div className="max-w-6xl">
         <h2 className="text-2xl font-bold text-gray-900 tracking-tight mb-2">Analytics</h2>
         <p className="text-sm text-gray-500 mb-8">High-level project activity and workload metrics.</p>
@@ -347,6 +356,7 @@ const Analytics = () => {
           </>
         )}
       </div>
+      )}
     </Layout>
   );
 };

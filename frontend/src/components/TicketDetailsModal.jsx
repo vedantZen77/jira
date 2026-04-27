@@ -13,6 +13,7 @@ import {
   UserMinus,
   CircleDot,
   Plus,
+  GripVertical,
 } from 'lucide-react';
 
 const TicketDetailsModal = ({
@@ -71,6 +72,7 @@ const TicketDetailsModal = ({
   const [subtaskAssigneeSearchText, setSubtaskAssigneeSearchText] = useState('');
   const [selectedSubtaskAssigneeId, setSelectedSubtaskAssigneeId] = useState('');
   const [activeSubtaskIndex, setActiveSubtaskIndex] = useState(null);
+  const [draggedSubtaskIndex, setDraggedSubtaskIndex] = useState(null);
 
   const getUrgencyStyles = () => {
     const dueOverdue = issue?.dueDate && new Date(issue.dueDate).getTime() < Date.now() && issue.status !== 'Done';
@@ -99,9 +101,12 @@ const TicketDetailsModal = ({
   })();
 
   const isIssueCreator = String(issue?.reporter?._id || issue?.reporter) === String(user?._id);
+  const isManagerRole = ['admin', 'manager', 'pgm'].includes(String(user?.role || '').toLowerCase());
+  const canEditTicketCore = isIssueCreator || isManagerRole;
+  const canDeleteIssue = isIssueCreator || isManagerRole;
 
   const handleDeleteIssue = async () => {
-    if (!isIssueCreator) return;
+    if (!canDeleteIssue) return;
     if (!window.confirm('Delete this ticket? This cannot be undone.')) return;
     try {
       setLoading(true);
@@ -154,7 +159,7 @@ const TicketDetailsModal = ({
 
   const currentAssigneeIds = currentAssigneeObjs.map((u) => String(u._id));
   const isIssueAssignee = currentAssigneeIds.includes(String(user?._id));
-  const canManageSubtasks = isIssueCreator || isIssueAssignee;
+  const canManageSubtasks = canEditTicketCore;
   const lifelineAssigned = Array.isArray(issue?.lifeline?.assigned)
     ? [...issue.lifeline.assigned].sort((a, b) => new Date(b.changedAt || 0) - new Date(a.changedAt || 0))
     : [];
@@ -526,6 +531,48 @@ const TicketDetailsModal = ({
     }
   };
 
+  const handleMoveChecklistItem = async (index, direction) => {
+    const current = Array.isArray(issue?.checklist) ? issue.checklist : [];
+    if (!current[index]) return;
+    const nextIndex = direction === 'up' ? index - 1 : index + 1;
+    if (nextIndex < 0 || nextIndex >= current.length) return;
+
+    const next = [...current];
+    const [moved] = next.splice(index, 1);
+    next.splice(nextIndex, 0, moved);
+
+    try {
+      setLoading(true);
+      const { data } = await api.patch(`/issues/${issue._id}/checklist`, { checklist: next });
+      onUpdate(data);
+      setEditedIssue((prev) => ({ ...prev, checklist: data.checklist }));
+    } catch (err) {
+      showToast('Failed to reorder subtask', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReorderChecklistItems = async (fromIndex, toIndex) => {
+    const current = Array.isArray(issue?.checklist) ? issue.checklist : [];
+    if (!current[fromIndex] || !current[toIndex] || fromIndex === toIndex) return;
+    const next = [...current];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+
+    try {
+      setLoading(true);
+      const { data } = await api.patch(`/issues/${issue._id}/checklist`, { checklist: next });
+      onUpdate(data);
+      setEditedIssue((prev) => ({ ...prev, checklist: data.checklist }));
+    } catch (err) {
+      showToast('Failed to reorder subtask', 'error');
+    } finally {
+      setLoading(false);
+      setDraggedSubtaskIndex(null);
+    }
+  };
+
   const handleAddIteration = async (e) => {
     e.preventDefault();
     if (!newIteration.trim()) return;
@@ -741,15 +788,20 @@ const TicketDetailsModal = ({
                   </div>
                 )}
 
-                {editMode && (
+                {editMode && canEditTicketCore && (
                   <div className="mt-4 flex justify-end space-x-2">
                     <button onClick={() => setEditMode(false)} className="px-4 py-2 font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
                     <button onClick={handleSave} disabled={loading} className="px-4 py-2 font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">Save Changes</button>
                   </div>
                 )}
-                {!editMode && (
+                {!editMode && canEditTicketCore && (
                   <div className="mt-4">
-                     <button onClick={() => setEditMode(true)} className="text-sm text-blue-600 font-semibold hover:underline">Edit Description</button>
+                     <button onClick={() => setEditMode(true)} className="text-sm text-blue-600 font-semibold hover:underline">Edit Ticket Details</button>
+                  </div>
+                )}
+                {!canEditTicketCore && (
+                  <div className="mt-4 text-xs text-gray-400">
+                    Only creator/reporter, manager, or PGM can edit title and description.
                   </div>
                 )}
 
@@ -766,8 +818,27 @@ const TicketDetailsModal = ({
                       issue.checklist.map((item, idx) => (
                         <div
                           key={`${idx}-${item?.text || 'item'}`}
-                          className="flex items-center gap-3 p-2.5 rounded-lg border border-gray-100 bg-gray-50"
+                          onDragOver={(e) => canManageSubtasks && e.preventDefault()}
+                          onDrop={() => {
+                            if (!canManageSubtasks || draggedSubtaskIndex === null) return;
+                            handleReorderChecklistItems(draggedSubtaskIndex, idx);
+                          }}
+                          className={`flex items-center gap-3 p-2.5 rounded-lg border bg-gray-50 ${
+                            draggedSubtaskIndex === idx ? 'border-blue-300 shadow-sm' : 'border-gray-100'
+                          }`}
                         >
+                          {canManageSubtasks && (
+                            <button
+                              type="button"
+                              draggable={!loading}
+                              onDragStart={() => setDraggedSubtaskIndex(idx)}
+                              onDragEnd={() => setDraggedSubtaskIndex(null)}
+                              className="inline-flex items-center justify-center w-6 h-6 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 cursor-grab active:cursor-grabbing"
+                              title="Drag to reorder"
+                            >
+                              <GripVertical size={14} />
+                            </button>
+                          )}
                           <input
                             type="checkbox"
                             checked={Boolean(item?.completed)}
@@ -782,10 +853,10 @@ const TicketDetailsModal = ({
                           >
                             {item?.text}
                           </span>
-                          <div className="min-w-[160px]">
-                            <div className="flex items-center gap-1.5">
-                              <div className="flex items-center bg-gray-50 text-gray-700 px-2 py-1 rounded-full text-[11px] font-medium border border-gray-200 max-w-[130px]">
-                                <span className="w-4 h-4 rounded-full bg-gray-300 flex items-center justify-center mr-1 text-white font-bold">
+                          <div className="min-w-[190px]">
+                            <div className="flex items-center gap-2">
+                              <div className="flex items-center bg-white text-gray-700 px-2.5 py-1.5 rounded-lg text-xs font-medium border border-gray-200 max-w-[150px] shadow-sm">
+                                <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center mr-1.5 text-[11px] font-bold">
                                   {getUserObject(item?.assignee)?.name?.charAt(0) || '?'}
                                 </span>
                                 <span className="truncate">
@@ -796,13 +867,13 @@ const TicketDetailsModal = ({
                                 type="button"
                                 onClick={() => openSubtaskAssigneeModal(idx)}
                                 disabled={loading || !canManageSubtasks}
-                                className="inline-flex items-center justify-center w-6 h-6 rounded-full text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100 transition disabled:opacity-50"
-                                title="Assign subtask"
+                                className="inline-flex items-center justify-center px-2 h-7 rounded-md text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100 transition disabled:opacity-50 text-[11px] font-semibold"
+                                title="Change assignee"
                               >
-                                <Plus size={12} />
+                                Assign
                               </button>
                             </div>
-                            <div className="mt-1 text-[10px] text-gray-500 truncate">
+                            <div className="mt-1 text-[10px] text-gray-500 truncate pl-0.5">
                               Working on: {getUserObject(item?.assignee)?.name || 'Nobody yet'}
                             </div>
                           </div>
@@ -1117,7 +1188,7 @@ const TicketDetailsModal = ({
                       >
                         Add to Template
                       </button>
-                      {isIssueCreator && (
+                      {canDeleteIssue && (
                         <button
                           type="button"
                           onClick={() => {
@@ -1129,9 +1200,9 @@ const TicketDetailsModal = ({
                           Delete Ticket
                         </button>
                       )}
-                      {!isIssueCreator && (
+                      {!canDeleteIssue && (
                         <div className="px-3 py-2 text-xs text-gray-400">
-                          Only creator can delete.
+                          Only creator, manager, or PGM can delete.
                         </div>
                       )}
                     </div>
@@ -1295,17 +1366,17 @@ const TicketDetailsModal = ({
               </div>
 
               <div className="pt-4 border-t border-gray-200 mt-4">
-                <label className="text-xs font-semibold text-gray-500 uppercase">Assignees</label>
+                <label className="text-xs font-semibold text-gray-500 uppercase">Assigned People</label>
                 {currentAssigneeObjs.length === 0 ? (
-                  <div className="mt-2 text-sm italic text-gray-500">Unassigned</div>
+                  <div className="mt-2 text-sm italic text-gray-500">No one assigned</div>
                 ) : (
-                  <div className="mt-2 flex flex-wrap gap-2">
+                  <div className="mt-2 flex flex-wrap gap-2.5">
                     {currentAssigneeObjs.map((u) => (
                       <div
                         key={String(u._id)}
-                        className="flex items-center bg-gray-50 text-gray-700 px-2.5 py-1 rounded-full text-xs font-medium border border-gray-200"
+                        className="flex items-center bg-white text-gray-700 px-2.5 py-1.5 rounded-lg text-xs font-medium border border-gray-200 shadow-sm"
                       >
-                        <span className="w-4 h-4 rounded-full bg-gray-300 flex items-center justify-center mr-2 text-white font-bold">
+                        <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center mr-2 text-[11px] font-bold">
                           {u.name?.charAt(0) || '?'}
                         </span>
                         <span className="whitespace-nowrap">{u.name}</span>

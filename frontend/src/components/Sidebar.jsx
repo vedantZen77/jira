@@ -31,11 +31,13 @@ const Sidebar = () => {
     navigate('/login');
   };
 
+  const canViewAnalytics = ['admin', 'manager', 'pgm'].includes(String(user?.role || '').toLowerCase());
+
   const navLinks = [
     { name: 'Dashboard', path: '/dashboard', icon: <LayoutDashboard size={20} /> },
     { name: 'Projects', path: '/projects', icon: <Folders size={20} /> },
     { name: 'My Issues', path: '/issues/me', icon: <CheckSquare size={20} /> },
-    { name: 'Analytics', path: '/analytics', icon: <LayoutDashboard size={20} /> },
+    ...(canViewAnalytics ? [{ name: 'Analytics', path: '/analytics', icon: <LayoutDashboard size={20} /> }] : []),
     { name: 'Templates', path: '/templates', icon: <ClipboardList size={20} /> },
     { name: 'Settings', path: '/settings', icon: <Settings size={20} /> },
   ];

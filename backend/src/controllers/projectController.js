@@ -13,6 +13,11 @@ const isLead = (project, userId) => {
   return leads.some((l) => l?.toString?.() === uid);
 };
 
+const isOrgManager = (user) => {
+  const role = String(user?.role || '').toLowerCase();
+  return ['admin', 'manager', 'pgm'].includes(role);
+};
+
 const ISSUE_TYPES = ['Bug', 'Feature', 'Task', 'Epic', 'Subtask'];
 const ISSUE_STATUSES = ['Backlog', 'Todo', 'In Progress', 'In Review', 'Testing', 'Done'];
 const ISSUE_PRIORITIES = ['Low', 'Medium', 'High', 'Critical'];
@@ -52,13 +57,16 @@ const normalizeBackupLabels = (labels) => {
 // @access  Private
 const getProjects = async (req, res) => {
   try {
-    const projects = await Project.find({
-      $or: [
-        { createdBy: req.user._id },
-        { leads: req.user._id },
-        { members: req.user._id },
-      ],
-    })
+    const query = isOrgManager(req.user)
+      ? {}
+      : {
+          $or: [
+            { createdBy: req.user._id },
+            { leads: req.user._id },
+            { members: req.user._id },
+          ],
+        };
+    const projects = await Project.find(query)
       .populate('createdBy', 'name email avatar')
       .populate('leads', 'name email avatar')
       .populate('members', 'name email avatar');

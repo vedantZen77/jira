@@ -3,6 +3,15 @@ const Project = require('../models/Project');
 const { getIO } = require('../socket');
 const { processNotificationEvent, NOTIFICATION_EVENTS } = require('../services/notificationEngine');
 const LABEL_COLORS = ['red', 'orange', 'yellow', 'green', 'blue', 'purple'];
+const MANAGER_ROLES = ['admin', 'manager', 'pgm'];
+
+const canEditIssueContent = (user, issue) => {
+  const role = String(user?.role || '').toLowerCase();
+  if (MANAGER_ROLES.includes(role)) return true;
+  const reporterId = String(issue?.reporter?._id || issue?.reporter || '');
+  const requesterId = String(user?._id || '');
+  return Boolean(reporterId && requesterId && reporterId === requesterId);
+};
 
 const populateIssueQuery = (query) =>
   query
@@ -267,6 +276,16 @@ const updateIssue = async (req, res) => {
       return res.status(404).json({ message: 'Issue not found' });
     }
 
+    const isContentEdit =
+      req.body?.title !== undefined ||
+      req.body?.description !== undefined ||
+      req.body?.checklist !== undefined;
+    if (isContentEdit && !canEditIssueContent(req.user, issue)) {
+      return res.status(403).json({
+        message: 'Only the ticket reporter/creator, manager, or PGM can edit ticket details and subtasks.',
+      });
+    }
+
     // Update fields
     const fieldsToUpdate = [
       'title',
@@ -454,8 +473,10 @@ const deleteIssue = async (req, res) => {
 
     const reporterId = issue.reporter?.toString();
     const requesterId = req.user?._id?.toString();
-    if (!reporterId || !requesterId || reporterId !== requesterId) {
-      return res.status(403).json({ message: 'Only the ticket creator can delete this ticket.' });
+    const requesterRole = String(req.user?.role || '').toLowerCase();
+    const canDeleteAsManager = MANAGER_ROLES.includes(requesterRole);
+    if ((!reporterId || !requesterId || reporterId !== requesterId) && !canDeleteAsManager) {
+      return res.status(403).json({ message: 'Only the ticket creator, manager, or PGM can delete this ticket.' });
     }
 
     const projectId = issue.projectId?._id ? issue.projectId._id : issue.projectId;
@@ -585,6 +606,12 @@ const updateIssueChecklist = async (req, res) => {
     const issue = await Issue.findById(req.params.id);
     if (!issue) {
       return res.status(404).json({ message: 'Issue not found' });
+    }
+
+    if (!canEditIssueContent(req.user, issue)) {
+      return res.status(403).json({
+        message: 'Only the ticket reporter/creator, manager, or PGM can edit subtasks.',
+      });
     }
 
     issue.checklist = normalized;
