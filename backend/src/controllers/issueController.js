@@ -13,6 +13,18 @@ const canEditIssueContent = (user, issue) => {
   return Boolean(reporterId && requesterId && reporterId === requesterId);
 };
 
+const canEditIssueChecklist = (user, issue) => {
+  if (canEditIssueContent(user, issue)) return true;
+  const requesterId = String(user?._id || '');
+  if (!requesterId) return false;
+  const assigneeIds = Array.isArray(issue?.assignees) && issue.assignees.length > 0
+    ? issue.assignees.map((id) => String(id))
+    : issue?.assignee
+      ? [String(issue.assignee)]
+      : [];
+  return assigneeIds.includes(requesterId);
+};
+
 const populateIssueQuery = (query) =>
   query
     .populate('assignee', 'name email avatar')
@@ -276,13 +288,16 @@ const updateIssue = async (req, res) => {
       return res.status(404).json({ message: 'Issue not found' });
     }
 
-    const isContentEdit =
-      req.body?.title !== undefined ||
-      req.body?.description !== undefined ||
-      req.body?.checklist !== undefined;
-    if (isContentEdit && !canEditIssueContent(req.user, issue)) {
+    const isCoreContentEdit = req.body?.title !== undefined || req.body?.description !== undefined;
+    const isChecklistEdit = req.body?.checklist !== undefined;
+    if (isCoreContentEdit && !canEditIssueContent(req.user, issue)) {
       return res.status(403).json({
-        message: 'Only the ticket reporter/creator, manager, or PGM can edit ticket details and subtasks.',
+        message: 'Only the ticket reporter/creator, manager, or PGM can edit ticket details.',
+      });
+    }
+    if (isChecklistEdit && !canEditIssueChecklist(req.user, issue)) {
+      return res.status(403).json({
+        message: 'Only the ticket reporter/creator, assignee, manager, or PGM can edit subtasks.',
       });
     }
 
@@ -608,9 +623,9 @@ const updateIssueChecklist = async (req, res) => {
       return res.status(404).json({ message: 'Issue not found' });
     }
 
-    if (!canEditIssueContent(req.user, issue)) {
+    if (!canEditIssueChecklist(req.user, issue)) {
       return res.status(403).json({
-        message: 'Only the ticket reporter/creator, manager, or PGM can edit subtasks.',
+        message: 'Only the ticket reporter/creator, assignee, manager, or PGM can edit subtasks.',
       });
     }
 

@@ -159,7 +159,7 @@ const TicketDetailsModal = ({
 
   const currentAssigneeIds = currentAssigneeObjs.map((u) => String(u._id));
   const isIssueAssignee = currentAssigneeIds.includes(String(user?._id));
-  const canManageSubtasks = canEditTicketCore;
+  const canManageSubtasks = canEditTicketCore || isIssueAssignee;
   const lifelineAssigned = Array.isArray(issue?.lifeline?.assigned)
     ? [...issue.lifeline.assigned].sort((a, b) => new Date(b.changedAt || 0) - new Date(a.changedAt || 0))
     : [];
